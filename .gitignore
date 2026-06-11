@@ -1,0 +1,62 @@
+# Dependências
+
+node_modules/
+
+# Build
+
+dist/
+build/
+
+# Variáveis de ambiente
+
+.env
+.env.local
+.env.development
+.env.production
+
+# Vite
+
+.vite/
+
+# Logs
+
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sistema Operacional
+
+.DS_Store
+Thumbs.db
+
+# IDEs
+
+.vscode/
+.idea/
+
+# Arquivos temporários
+
+*.tmp
+*.temp
+
+# Cache
+
+.cache/
+.eslintcache
+
+# Supabase Local
+
+.supabase/
+
+# Replit
+
+.replit
+.replit-artifact/
+
+# Arquivos de ambiente locais
+
+.env.*
+!.env.example
