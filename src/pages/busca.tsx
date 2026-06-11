@@ -19,6 +19,18 @@ import {
   Flame,
   Thermometer,
   Snowflake,
+  Eye,
+  BookmarkPlus,
+  Send,
+  BrainCircuit,
+  MessageSquareText,
+  Download,
+  RefreshCw,
+  Check,
+  BarChart3,
+  ShieldCheck,
+  ExternalLink,
+  ArrowUpRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +57,7 @@ type Lead = {
   address: string;
   phone?: string;
   website?: string;
+  maps_url?: string;
   google_rating?: number;
   google_reviews_count?: number;
   score: number;
@@ -465,6 +478,186 @@ async function searchLeads(body: any): Promise<Lead[]> {
     real_data: true,
   }));
 }
+
+function getOpportunityReason(lead: Lead) {
+  const reasons: string[] = [];
+
+  if ((lead.google_rating || 0) >= 4.7) {
+    reasons.push("alta avaliação");
+  }
+
+  if ((lead.google_reviews_count || 0) >= 80) {
+    reasons.push("volume forte de avaliações");
+  }
+
+  if (lead.phone) {
+    reasons.push("telefone disponível");
+  }
+
+  if (lead.website) {
+    reasons.push("site ativo");
+  } else {
+    reasons.push("sem site detectado");
+  }
+
+  if ((lead.score || 0) >= 80) {
+    reasons.push("alto potencial comercial");
+  }
+
+  return reasons.slice(0, 3).join(" + ") || "dados suficientes para abordagem";
+}
+
+function getResultSummary(leads: Lead[]) {
+  const total = leads.length;
+  const withPhone = leads.filter((lead) => Boolean(lead.phone)).length;
+  const withWebsite = leads.filter((lead) => Boolean(lead.website)).length;
+  const withoutWebsite = total - withWebsite;
+  const hot = leads.filter((lead) => (lead.score || 0) >= 70).length;
+  const avgRating =
+    total > 0
+      ? leads.reduce((sum, lead) => sum + Number(lead.google_rating || 0), 0) /
+        total
+      : 0;
+  const avgScore =
+    total > 0
+      ? Math.round(
+          leads.reduce((sum, lead) => sum + Number(lead.score || 0), 0) / total
+        )
+      : 0;
+
+  return {
+    total,
+    withPhone,
+    withWebsite,
+    withoutWebsite,
+    hot,
+    avgRating,
+    avgScore,
+  };
+}
+
+function buildApproachText(lead: Lead) {
+  return `Olá, tudo bem? Vi a ${lead.name} e percebi que vocês têm um ótimo potencial para captar mais clientes pelo WhatsApp e agenda online. A NXA ajuda empresas como a sua a responder leads automaticamente, organizar contatos e transformar conversas em vendas. Posso te mostrar uma ideia rápida aplicada ao seu negócio?`;
+}
+
+function normalizeExternalUrl(url?: string) {
+  const clean = String(url || "").trim();
+
+  if (!clean) return "";
+
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+
+  return `https://${clean}`;
+}
+
+function onlyDigits(value?: string) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function buildWhatsAppUrl(phone?: string) {
+  let digits = onlyDigits(phone);
+
+  if (!digits) return "";
+
+  if (digits.length === 10 || digits.length === 11) {
+    digits = `55${digits}`;
+  }
+
+  return `https://wa.me/${digits}`;
+}
+
+function buildMapsUrl(lead: Lead) {
+  if (lead.maps_url) return normalizeExternalUrl(lead.maps_url);
+
+  const query = [lead.name, lead.address, lead.city, lead.state]
+    .filter(Boolean)
+    .join(" ");
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    query
+  )}`;
+}
+
+function readStringArrayStorage(key: string) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStringArrayStorage(key: string, value: string[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(new Set(value))));
+  } catch {
+    // localStorage indisponível não deve travar a busca
+  }
+}
+
+function upsertLocalStorageItem<T extends { id: string }>(key: string, item: T) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    const current = Array.isArray(parsed) ? parsed : [];
+    const next = [item, ...current.filter((row: any) => row?.id !== item.id)];
+    localStorage.setItem(key, JSON.stringify(next.slice(0, 500)));
+  } catch {
+    // fallback silencioso para não quebrar a interface
+  }
+}
+
+function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
+  const headers = [
+    "Nome",
+    "Segmento",
+    "Cidade",
+    "Estado",
+    "Endereco",
+    "Telefone",
+    "Site",
+    "Avaliacao",
+    "Avaliacoes",
+    "Score",
+    "Status",
+  ];
+
+  const rows = leads.map((lead) => [
+    lead.name,
+    lead.segment,
+    lead.city,
+    lead.state,
+    lead.address,
+    lead.phone || "",
+    lead.website || "",
+    lead.google_rating || "",
+    lead.google_reviews_count || "",
+    lead.score || "",
+    lead.status || "",
+  ]);
+
+  const csv = [headers, ...rows]
+    .map((row) =>
+      row
+        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+        .join(";")
+    )
+    .join("\n");
+
+  const blob = new Blob(["\uFEFF" + csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
 export function Busca() {
   const { toast } = useToast();
 
@@ -488,6 +681,9 @@ export function Busca() {
   const [searches, setSearches] = React.useState<any[]>([]);
   const [credits, setCredits] = React.useState<number>(0);
   const [creditsLoading, setCreditsLoading] = React.useState(true);
+  const [savedLeadIds, setSavedLeadIds] = React.useState<string[]>([]);
+  const [crmLeadIds, setCrmLeadIds] = React.useState<string[]>([]);
+  const [approachLeadIds, setApproachLeadIds] = React.useState<string[]>([]);
 
   const category = React.useMemo(() => {
     return (
@@ -508,6 +704,12 @@ export function Busca() {
   React.useEffect(() => {
     loadSearchHistory();
     loadCredits();
+  }, []);
+
+  React.useEffect(() => {
+    setSavedLeadIds(readStringArrayStorage("nxa_saved_lead_ids"));
+    setCrmLeadIds(readStringArrayStorage("nxa_crm_lead_ids"));
+    setApproachLeadIds(readStringArrayStorage("nxa_approach_lead_ids"));
   }, []);
 
   async function loadCredits() {
@@ -846,6 +1048,254 @@ export function Busca() {
     }
   };
 
+
+  const resultSummary = React.useMemo(
+    () => getResultSummary(results),
+    [results]
+  );
+
+  const handleExportCsv = () => {
+    if (!results.length) {
+      toast({
+        title: "Nenhum lead para exportar",
+        description: "Execute uma busca antes de exportar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    exportLeadsCsv(
+      results,
+      `nxa-leads-${city.toLowerCase().replace(/\s+/g, "-")}-${state}.csv`
+    );
+
+    toast({
+      title: "CSV exportado",
+      description: `${results.length} lead(s) enviados para download.`,
+    });
+  };
+
+  const markLeadSaved = React.useCallback((lead: Lead) => {
+    setSavedLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_saved_lead_ids", next);
+      return next;
+    });
+
+    upsertLocalStorageItem("nxa_saved_leads", {
+      ...lead,
+      saved_at: new Date().toISOString(),
+    });
+  }, []);
+
+  const markLeadCrm = React.useCallback((lead: Lead) => {
+    setCrmLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_crm_lead_ids", next);
+      return next;
+    });
+
+    upsertLocalStorageItem("nxa_crm_queue", {
+      ...lead,
+      stage: "novo",
+      sent_at: new Date().toISOString(),
+    });
+  }, []);
+
+  const markApproachGenerated = React.useCallback((lead: Lead) => {
+    setApproachLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_approach_lead_ids", next);
+      return next;
+    });
+  }, []);
+
+  const handleSaveLead = async (lead: Lead) => {
+    if (savedLeadIds.includes(lead.id)) {
+      toast({
+        title: "Lead já salvo",
+        description: `${lead.name} já está na sua lista de leads salvos.`,
+      });
+      return;
+    }
+
+    markLeadSaved(lead);
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+
+      const payload = {
+        user_id: authData?.user?.id || null,
+        business_id: import.meta.env.VITE_BUSINESS_ID || null,
+        tenant_id: import.meta.env.VITE_TENANT_ID || null,
+        name: lead.name,
+        segment: lead.segment,
+        city: lead.city,
+        state: lead.state,
+        address: lead.address,
+        phone: lead.phone || null,
+        website: lead.website || null,
+        google_rating: lead.google_rating || null,
+        google_reviews_count: lead.google_reviews_count || null,
+        score: lead.score || 0,
+        status: "saved",
+        source: "busca_inteligente",
+        payload: lead,
+      };
+
+      const { error } = await supabase.from("leads").insert(payload);
+
+      if (error) throw error;
+
+      toast({
+        title: "Lead salvo",
+        description: `${lead.name} foi enviado para sua base de leads.`,
+      });
+    } catch (error) {
+      console.error("Erro ao salvar lead no banco:", error);
+
+      toast({
+        title: "Lead salvo localmente",
+        description:
+          "O banco não aceitou esse registro agora, mas o lead ficou salvo neste navegador e pode ser exportado.",
+      });
+    }
+  };
+
+  const handleSendToCrm = async (lead: Lead) => {
+    if (crmLeadIds.includes(lead.id)) {
+      toast({
+        title: "Lead já está no CRM",
+        description: `${lead.name} já foi enviado para o pipeline.`,
+      });
+      return;
+    }
+
+    markLeadCrm(lead);
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+
+      const payload = {
+        user_id: authData?.user?.id || null,
+        business_id: import.meta.env.VITE_BUSINESS_ID || null,
+        tenant_id: import.meta.env.VITE_TENANT_ID || null,
+        title: lead.name,
+        company_name: lead.name,
+        contact_phone: lead.phone || null,
+        website: lead.website || null,
+        city: lead.city,
+        state: lead.state,
+        stage: "novo",
+        score: lead.score || 0,
+        value: 0,
+        source: "busca_inteligente",
+        notes: `Lead enviado pela Busca Inteligente. Motivo: ${getOpportunityReason(
+          lead
+        )}.`,
+        payload: lead,
+      };
+
+      const { error } = await supabase.from("crm_deals").insert(payload);
+
+      if (error) throw error;
+
+      toast({
+        title: "Enviado para o CRM",
+        description: `${lead.name} entrou no pipeline comercial.`,
+      });
+    } catch (error) {
+      console.error("Erro ao enviar para CRM no banco:", error);
+
+      toast({
+        title: "CRM salvo localmente",
+        description:
+          "Não consegui gravar no banco agora, mas o lead foi marcado como enviado e entrou na fila local.",
+      });
+    }
+  };
+
+  const handleGenerateApproach = async (lead: Lead) => {
+    const text = buildApproachText(lead);
+    markApproachGenerated(lead);
+
+    try {
+      await navigator.clipboard.writeText(text);
+
+      toast({
+        title: "Abordagem IA copiada",
+        description: `Mensagem pronta para abordar ${lead.name}.`,
+      });
+    } catch {
+      toast({
+        title: "Abordagem IA gerada",
+        description:
+          "Seu navegador bloqueou a cópia automática, mas a abordagem foi gerada.",
+      });
+    }
+  };
+
+  const handleOpenWebsite = (lead: Lead) => {
+    const url = normalizeExternalUrl(lead.website);
+
+    if (!url) {
+      toast({
+        title: "Site não encontrado",
+        description: "Esse lead não possui site disponível.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleOpenMaps = (lead: Lead) => {
+    window.open(buildMapsUrl(lead), "_blank", "noopener,noreferrer");
+  };
+
+  const handleOpenWhatsApp = (lead: Lead) => {
+    const url = buildWhatsAppUrl(lead.phone);
+
+    if (!url) {
+      toast({
+        title: "Telefone indisponível",
+        description: "Esse lead não possui telefone para abrir no WhatsApp.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleRepeatSearch = (search: any) => {
+    if (search.city) setCity(search.city);
+    if (search.state) setState(search.state);
+    if (search.radius_km) setRadius(Number(search.radius_km));
+    if (search.quantity) setQuantity(Number(search.quantity));
+
+    const leads = Array.isArray(search.results)
+      ? search.results
+      : Array.isArray(search.leads)
+        ? search.leads
+        : [];
+
+    if (leads.length) {
+      setResults(leads);
+      saveLastSearchForRadar({
+        ...search,
+        results: leads,
+        leads,
+      });
+    }
+
+    toast({
+      title: "Busca recuperada",
+      description: "Resultados carregados para análise.",
+    });
+  };
+
   return (
     <div className="space-y-6 p-6 lg:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -1157,23 +1607,131 @@ export function Busca() {
       </motion.div>
 
       <div className="rounded-2xl border border-border bg-card/60 p-6">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Search className="h-4 w-4" />
-            Resultados da busca
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Search className="h-4 w-4 text-primary" />
+              Resultados da busca
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Análise comercial, qualidade dos dados e ações rápidas para cada lead.
+            </p>
           </div>
 
-          <span className="text-xs text-muted-foreground">
-            {results.length} lead(s)
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCsv}
+              disabled={!results.length}
+              className="gap-2"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exportar CSV
+            </Button>
+
+            <span className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {results.length} lead(s)
+            </span>
+          </div>
         </div>
+
+        {results.length > 0 && !running && (
+          <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <SummaryCard
+              icon={BarChart3}
+              label="Leads encontrados"
+              value={resultSummary.total}
+              description="total da varredura"
+            />
+
+            <SummaryCard
+              icon={Phone}
+              label="Com telefone"
+              value={resultSummary.withPhone}
+              description="prontos para contato"
+            />
+
+            <SummaryCard
+              icon={Globe}
+              label="Com site"
+              value={resultSummary.withWebsite}
+              description="presença digital"
+            />
+
+            <SummaryCard
+              icon={Target}
+              label="Sem site"
+              value={resultSummary.withoutWebsite}
+              description="oportunidade digital"
+            />
+
+            <SummaryCard
+              icon={Star}
+              label="Média"
+              value={
+                resultSummary.avgRating
+                  ? resultSummary.avgRating.toFixed(1)
+                  : "—"
+              }
+              description="avaliação Google"
+            />
+
+            <SummaryCard
+              icon={Flame}
+              label="Potencial"
+              value={`${resultSummary.avgScore}/100`}
+              description={`${resultSummary.hot} leads quentes`}
+            />
+          </div>
+        )}
+
+        {results.length > 0 && !running && (
+          <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-primary/10 p-2">
+                  <BrainCircuit className="h-5 w-5 text-primary" />
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold">
+                    Diagnóstico IA da varredura
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {resultSummary.withPhone} leads já possuem telefone para
+                    abordagem, {resultSummary.withoutWebsite} parecem ter lacuna
+                    digital e {resultSummary.hot} entraram como oportunidades
+                    quentes.
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  const bestLead = [...results].sort(
+                    (a, b) => (b.score || 0) - (a.score || 0)
+                  )[0];
+
+                  if (bestLead) handleGenerateApproach(bestLead);
+                }}
+              >
+                <MessageSquareText className="h-3.5 w-3.5" />
+                Copiar abordagem do melhor lead
+              </Button>
+            </div>
+          </div>
+        )}
 
         {running ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, index) => (
               <div
                 key={index}
-                className="h-40 animate-pulse rounded-xl border border-border bg-muted/30"
+                className="h-56 animate-pulse rounded-xl border border-border bg-muted/30"
               />
             ))}
           </div>
@@ -1185,16 +1743,39 @@ export function Busca() {
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {results.map((lead) => (
-              <LeadCard key={lead.id} lead={lead} />
+              <LeadCard
+                key={lead.id}
+                lead={lead}
+                saved={savedLeadIds.includes(lead.id)}
+                inCrm={crmLeadIds.includes(lead.id)}
+                approachGenerated={approachLeadIds.includes(lead.id)}
+                onSave={handleSaveLead}
+                onSendToCrm={handleSendToCrm}
+                onGenerateApproach={handleGenerateApproach}
+                onOpenWebsite={handleOpenWebsite}
+                onOpenMaps={handleOpenMaps}
+                onOpenWhatsApp={handleOpenWhatsApp}
+              />
             ))}
           </div>
         )}
       </div>
 
       <div className="rounded-2xl border border-border bg-card/60 p-6">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
-          <Search className="h-4 w-4" />
-          Histórico de buscas
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Search className="h-4 w-4 text-primary" />
+              Histórico de buscas
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Reabra, repita ou envie buscas anteriores para o Radar.
+            </p>
+          </div>
+
+          <span className="text-xs text-muted-foreground">
+            {searches.length} registro(s)
+          </span>
         </div>
 
         {loadingHistory ? (
@@ -1207,48 +1788,92 @@ export function Busca() {
           </div>
         ) : (
           <div className="space-y-2">
-            {searches.map((search) => (
-              <button
-                key={search.id}
-                onClick={() => {
-                  const leads = Array.isArray(search.results)
-                    ? search.results
-                    : Array.isArray(search.leads)
-                      ? search.leads
-                      : [];
+            {searches.map((search) => {
+              const leads = Array.isArray(search.results)
+                ? search.results
+                : Array.isArray(search.leads)
+                  ? search.leads
+                  : [];
 
-                  if (leads.length) {
-                    setResults(leads);
-                    saveLastSearchForRadar({
-                      ...search,
-                      results: leads,
-                      leads,
-                    });
-                  }
-                }}
-                className="w-full text-left flex items-center justify-between rounded-md border border-border bg-muted/20 p-3 hover:bg-muted/40 transition-colors"
-              >
-                <div>
-                  <div className="text-sm font-medium">
-                    {search.niche || search.query || "Busca"}
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {search.city || "—"} / {search.state || "—"}
-                    </span>
+              return (
+                <div
+                  key={search.id}
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3 transition-colors hover:bg-muted/40 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {search.niche || search.query || "Busca"}
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {search.city || "—"} / {search.state || "—"}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {search.created_at
+                        ? new Date(search.created_at).toLocaleString("pt-BR")
+                        : "Data não informada"}{" "}
+                      · {search.results_count || leads.length || 0} resultados ·{" "}
+                      {search.credits_used || 0} créditos
+                    </div>
                   </div>
 
-                  <div className="text-xs text-muted-foreground">
-                    {search.created_at
-                      ? new Date(search.created_at).toLocaleString("pt-BR")
-                      : "Data não informada"}{" "}
-                    · {search.results_count || 0} resultados ·{" "}
-                    {search.credits_used || 0} créditos
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill status={search.status || "completed"} />
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      onClick={() => handleRepeatSearch(search)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Ver
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      onClick={() => {
+                        handleRepeatSearch(search);
+                        setTimeout(() => {
+                          saveLastSearchForRadar({
+                            ...search,
+                            results: leads,
+                            leads,
+                          });
+                        }, 0);
+                      }}
+                    >
+                      <Radar className="h-3.5 w-3.5" />
+                      Radar
+                    </Button>
+
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      onClick={() => {
+                        if (search.city) setCity(search.city);
+                        if (search.state) setState(search.state);
+                        if (search.radius_km) setRadius(Number(search.radius_km));
+                        if (search.quantity) setQuantity(Number(search.quantity));
+
+                        toast({
+                          title: "Parâmetros recuperados",
+                          description:
+                            "Revise os filtros e clique em Iniciar para executar de novo.",
+                        });
+                      }}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Repetir
+                    </Button>
                   </div>
                 </div>
-
-                <StatusPill status={search.status || "completed"} />
-              </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -1311,14 +1936,64 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function LeadCard({ lead }: { lead: Lead }) {
+function SummaryCard({
+  icon: Icon,
+  label,
+  value,
+  description,
+}: {
+  icon: any;
+  label: string;
+  value: React.ReactNode;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-4">
+      <Icon className="h-4 w-4 text-primary" />
+      <p className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 text-xl font-black">{value}</p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function LeadCard({
+  lead,
+  saved,
+  inCrm,
+  approachGenerated,
+  onSave,
+  onSendToCrm,
+  onGenerateApproach,
+  onOpenWebsite,
+  onOpenMaps,
+  onOpenWhatsApp,
+}: {
+  lead: Lead;
+  saved: boolean;
+  inCrm: boolean;
+  approachGenerated: boolean;
+  onSave: (lead: Lead) => void;
+  onSendToCrm: (lead: Lead) => void;
+  onGenerateApproach: (lead: Lead) => void;
+  onOpenWebsite: (lead: Lead) => void;
+  onOpenMaps: (lead: Lead) => void;
+  onOpenWhatsApp: (lead: Lead) => void;
+}) {
   const scoreColor = getScoreColor(lead.score || 0);
+  const hasWebsite = Boolean(lead.website);
+  const hasPhone = Boolean(lead.phone);
+  const opportunityReason = getOpportunityReason(lead);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="overflow-hidden rounded-xl border bg-background/60 transition-all hover:-translate-y-0.5 hover:border-primary/40"
+      className="group overflow-hidden rounded-xl border bg-background/60 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
       style={{
         borderColor: `${scoreColor}33`,
       }}
@@ -1360,19 +2035,132 @@ function LeadCard({ lead }: { lead: Lead }) {
           </div>
         </div>
 
+        <div className="mb-3 rounded-lg border border-border bg-muted/20 p-3">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <BrainCircuit className="h-3.5 w-3.5 text-primary" />
+            Potencial {lead.score || 0}/100
+          </div>
+
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            Motivo: {opportunityReason}.
+          </p>
+        </div>
+
         <div className="space-y-1.5">
           <Info icon={MapPin}>{lead.address || "Endereço não informado"}</Info>
 
-          {lead.phone && <Info icon={Phone}>{lead.phone}</Info>}
+          {hasPhone ? (
+            <Info icon={Phone}>{lead.phone}</Info>
+          ) : (
+            <Info icon={Phone}>Telefone não informado</Info>
+          )}
 
-          {lead.website ? (
+          {hasWebsite ? (
             <Info icon={Globe}>{lead.website}</Info>
           ) : (
             <Info icon={Globe}>Sem website detectado</Info>
           )}
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <MiniMetric
+            label="Avaliação"
+            value={lead.google_rating ? lead.google_rating.toFixed(1) : "—"}
+            icon={Star}
+          />
+
+          <MiniMetric
+            label="Reviews"
+            value={lead.google_reviews_count || 0}
+            icon={MessageSquareText}
+          />
+
+          <MiniMetric
+            label="Dados"
+            value={`${hasPhone ? 1 : 0}${hasWebsite ? 1 : 0}/2`}
+            icon={ShieldCheck}
+          />
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
+          <Button
+            variant={approachGenerated ? "outline" : "secondary"}
+            size="sm"
+            className="h-8 flex-1 gap-1.5"
+            onClick={() => onGenerateApproach(lead)}
+          >
+            {approachGenerated ? (
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            ) : (
+              <BrainCircuit className="h-3.5 w-3.5" />
+            )}
+            {approachGenerated ? "Copiada" : "Abordagem IA"}
+          </Button>
+
+          <Button
+            variant={saved ? "secondary" : "outline"}
+            size="sm"
+            className="h-8 flex-1 gap-1.5"
+            onClick={() => onSave(lead)}
+          >
+            {saved ? (
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            ) : (
+              <BookmarkPlus className="h-3.5 w-3.5" />
+            )}
+            {saved ? "Salvo" : "Salvar"}
+          </Button>
+
+          <Button
+            variant={inCrm ? "secondary" : "outline"}
+            size="sm"
+            className="h-8 flex-1 gap-1.5"
+            onClick={() => onSendToCrm(lead)}
+          >
+            {inCrm ? (
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            {inCrm ? "No CRM" : "CRM"}
+          </Button>
+        </div>
+
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={!hasPhone}
+            onClick={() => onOpenWhatsApp(lead)}
+          >
+            <Phone className="h-3.5 w-3.5" />
+            WhatsApp
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={!hasWebsite}
+            onClick={() => onOpenWebsite(lead)}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Site
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => onOpenMaps(lead)}
+          >
+            <ArrowUpRight className="h-3.5 w-3.5" />
+            Maps
+          </Button>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-1 text-xs">
             <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
             <span className="font-semibold">
@@ -1389,6 +2177,27 @@ function LeadCard({ lead }: { lead: Lead }) {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon: any;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-2">
+      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <Icon className="h-3 w-3" />
+        {label}
+      </div>
+
+      <div className="mt-1 text-sm font-bold">{value}</div>
+    </div>
   );
 }
 
