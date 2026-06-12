@@ -113,6 +113,20 @@ type LeadIntelligence = {
   cnpj_data?: any | null;
   website_scan?: any | null;
   social_links?: any | null;
+  compatibility_score?: number;
+  need_score?: number;
+  financial_score?: number;
+  response_score?: number;
+  confidence_score?: number;
+  disqualification_risk?: string;
+  qualification_level?: string;
+  strategic_tags?: string[];
+  buying_triggers?: string[];
+  pain_hypotheses?: string[];
+  decision_maker_hint?: string;
+  offer_fit_reason?: string;
+  personalization_hooks?: string[];
+  first_question?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -340,12 +354,143 @@ function getReviewsCount(lead: any) {
   return Number(lead?.reviews_count || lead?.user_ratings_total || lead?.rating_count || 0) || 0;
 }
 
-function getExecutiveRecommendation(score: number, probability: number) {
-  const power = Math.max(score, probability);
-  if (power >= 85) return { label: "Prospectar agora", tone: "emerald" as const, description: "Lead com alto encaixe comercial. Priorize contato consultivo ainda hoje e avance para demonstração ou proposta." };
-  if (power >= 70) return { label: "Alta prioridade", tone: "cyan" as const, description: "Boa oportunidade. Validar dor principal, mostrar ganho financeiro e criar follow-up curto." };
-  if (power >= 50) return { label: "Nutrir e validar", tone: "orange" as const, description: "Existe potencial, mas ainda faltam sinais de urgência. Faça abordagem leve e colete mais contexto." };
-  return { label: "Baixa prioridade", tone: "slate" as const, description: "Não coloque no topo da fila. Use automação ou cadência fria somente se houver sobra de capacidade." };
+function getExecutiveRecommendation(score: number) {
+  if (score >= 85) return { label: "Prospectar agora", tone: "emerald" as const, description: "Lead com muitos sinais públicos favoráveis. Priorize contato consultivo ainda hoje e avance para diagnóstico ou demonstração." };
+  if (score >= 70) return { label: "Alta prioridade", tone: "cyan" as const, description: "Boa oportunidade. Validar dor principal, conectar a oferta aos sinais encontrados e criar follow-up curto." };
+  if (score >= 50) return { label: "Nutrir e validar", tone: "orange" as const, description: "Existe potencial, mas faltam sinais claros de urgência. Faça abordagem leve e colete mais contexto antes de proposta." };
+  return { label: "Baixa prioridade", tone: "slate" as const, description: "Não coloque no topo da fila. Use cadência fria ou automação apenas se houver sobra de capacidade comercial." };
+}
+
+function getPriorityLevel(score: number) {
+  if (score >= 75) return { label: "Alta", tone: "emerald" as const, description: "Lead acessível, com bons sinais públicos e alta prioridade para contato." };
+  if (score >= 50) return { label: "Média", tone: "orange" as const, description: "Lead com sinais úteis, mas ainda precisa validação de dor, orçamento e timing." };
+  return { label: "Baixa", tone: "slate" as const, description: "Lead com poucos sinais comerciais. Não deve ocupar o topo da operação." };
+}
+
+function getIntentLevel(score: number, hasWhatsapp: boolean, hasSite: boolean, reviewsCount: number) {
+  const intentScore = clampScore((hasWhatsapp ? 30 : 0) + (hasSite ? 20 : 0) + (reviewsCount >= 50 ? 25 : reviewsCount >= 10 ? 15 : 5) + Math.round(score * 0.25));
+  if (intentScore >= 75) return { label: "Alta", score: intentScore, tone: "emerald" as const, description: "Possui bons sinais públicos para iniciar abordagem comercial agora." };
+  if (intentScore >= 50) return { label: "Média", score: intentScore, tone: "orange" as const, description: "Existe abertura para contato, mas a intenção real precisa ser validada na conversa." };
+  return { label: "Baixa", score: intentScore, tone: "slate" as const, description: "Poucos sinais de intenção observável. Use abordagem fria e sem promessa de urgência." };
+}
+
+function getAnalysisConfidence(signals: boolean[]) {
+  const available = signals.filter(Boolean).length;
+  return clampScore(Math.round((available / Math.max(signals.length, 1)) * 100));
+}
+
+
+function normalizeText(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function keywordScore(text: string, groups: string[][]) {
+  const normalized = normalizeText(text);
+  let score = 0;
+  groups.forEach((group) => {
+    if (group.some((word) => normalized.includes(normalizeText(word)))) score += 1;
+  });
+  return score;
+}
+
+function getOfferText(offer?: SalesOffer | null) {
+  if (!offer) return "";
+  return [offer.name, offer.description, offer.ideal_customer, offer.pain_points, offer.differentials, offer.target_segments]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildOfferFitEngine(params: {
+  lead: any;
+  intelligence?: LeadIntelligence | null;
+  offer?: SalesOffer | null;
+  hasWhatsapp: boolean;
+  hasSite: boolean;
+  hasInstagram: boolean;
+  hasOnlineScheduling: boolean;
+  hasPixel: boolean;
+  hasAnalytics: boolean;
+  reviewsCount: number;
+}) {
+  const { lead, intelligence, offer, hasWhatsapp, hasSite, hasInstagram, hasOnlineScheduling, hasPixel, hasAnalytics, reviewsCount } = params;
+  const leadCategory = getLeadCategory(lead);
+  const leadName = getLeadName(lead);
+  const leadText = [leadName, leadCategory, getLeadCity(lead), getLeadState(lead), getLeadAddress(lead), lead?.description, lead?.types, lead?.business_status]
+    .filter(Boolean)
+    .join(" ");
+  const offerText = getOfferText(offer);
+  const fullText = `${offerText} ${leadText}`;
+
+  const officeNeed = keywordScore(fullText, [["cadeira", "moveis", "móveis", "ergonom"], ["escritorio", "advocacia", "contabilidade", "clinica", "administrativo", "coworking"]]);
+  const digitalNeed = keywordScore(fullText, [["marketing", "trafego", "tráfego", "site", "crm", "automacao", "automação", "ia", "lead"], ["clinica", "barbearia", "estetica", "imobiliaria", "academia", "pet", "restaurante"]]);
+  const operationsNeed = keywordScore(fullText, [["erp", "sistema", "gestao", "gestão", "agenda", "financeiro", "software"], ["loja", "oficina", "clinica", "distribuidora", "servicos", "serviços"]]);
+  const solarNeed = keywordScore(fullText, [["solar", "energia", "fotovoltaica"], ["industria", "supermercado", "academia", "hotel", "condominio", "restaurante", "posto"]]);
+  const cleaningNeed = keywordScore(fullText, [["limpeza", "higienizacao", "higienização", "estofado", "impermeabilizacao"], ["hotel", "pousada", "clinica", "escola", "buffet", "restaurante", "estetica"]]);
+
+  const segmentAffinity = Math.max(officeNeed, digitalNeed, operationsNeed, solarNeed, cleaningNeed);
+  const offerDeclared = Boolean(offer?.name || offer?.description);
+  const publicSignalScore = clampScore((hasWhatsapp ? 18 : 0) + (hasSite ? 14 : 0) + (hasInstagram ? 10 : 0) + (reviewsCount >= 50 ? 18 : reviewsCount >= 10 ? 12 : reviewsCount > 0 ? 6 : 0) + (hasPixel || hasAnalytics ? 8 : 0));
+
+  const compatibility = clampScore(
+    intelligence?.compatibility_score ??
+      intelligence?.fit_score ??
+      (offerDeclared ? 42 + segmentAffinity * 14 + (hasSite ? 8 : 0) + (reviewsCount >= 10 ? 7 : 0) : getFitScore(lead, intelligence) || 45)
+  );
+  const need = clampScore(
+    intelligence?.need_score ??
+      (38 + segmentAffinity * 13 + (!hasOnlineScheduling && digitalNeed ? 10 : 0) + (!hasSite && digitalNeed ? 8 : 0) + (reviewsCount >= 20 ? 8 : 0))
+  );
+  const financial = clampScore(
+    intelligence?.financial_score ??
+      (30 + (hasSite ? 18 : 0) + (reviewsCount >= 100 ? 24 : reviewsCount >= 30 ? 17 : reviewsCount >= 10 ? 10 : 3) + (hasInstagram ? 8 : 0) + (hasPixel || hasAnalytics ? 10 : 0))
+  );
+  const response = clampScore(
+    intelligence?.response_score ??
+      (25 + (hasWhatsapp ? 30 : 0) + (hasSite ? 10 : 0) + (hasInstagram ? 12 : 0) + (reviewsCount > 0 ? 8 : 0))
+  );
+  const confidence = clampScore(intelligence?.confidence_score ?? Math.round((publicSignalScore + compatibility) / 2));
+  const finalScore = clampScore(Math.round(compatibility * 0.34 + need * 0.26 + financial * 0.2 + response * 0.2));
+
+  const qualificationLevel = intelligence?.qualification_level || (finalScore >= 82 ? "Lead premium" : finalScore >= 68 ? "Alta chance comercial" : finalScore >= 52 ? "Validar antes da proposta" : "Nutrição fria");
+  const disqualificationRisk = intelligence?.disqualification_risk || (!offerDeclared ? "Oferta não cadastrada: análise usa sinais públicos e fica menos precisa." : finalScore < 52 ? "Aderência baixa: não investir muito tempo sem validar dor e orçamento." : confidence < 55 ? "Poucos dados públicos: confirmar contexto antes de prometer resultado." : "Baixo risco: sinais suficientes para uma abordagem consultiva.");
+
+  const tags = arrayFrom(intelligence?.strategic_tags).length ? arrayFrom(intelligence?.strategic_tags) : [
+    offerDeclared ? "Oferta conectada" : "Precisa cadastrar oferta",
+    hasWhatsapp ? "Contato direto" : "Enriquecer telefone",
+    hasSite ? "Presença digital" : "Sem site claro",
+    reviewsCount >= 20 ? "Prova social" : "Poucas avaliações",
+    finalScore >= 70 ? "Prioridade alta" : "Validar fit",
+  ];
+
+  const painHypotheses = arrayFrom(intelligence?.pain_hypotheses).length ? arrayFrom(intelligence?.pain_hypotheses) : [
+    !hasOnlineScheduling ? "Pode perder oportunidades por atendimento manual, demora de resposta ou ausência de agendamento online." : "Pode precisar melhorar integração entre agenda, CRM, pós-venda e reativação.",
+    !hasPixel && !hasAnalytics ? "Pode não medir bem origem dos contatos, remarketing e retorno das campanhas." : "Já possui sinais de mensuração, então a conversa pode avançar para otimização e escala.",
+    reviewsCount >= 20 ? "Fluxo de clientes já existe; o foco da oferta deve ser ganho de eficiência, conversão ou ticket." : "Precisa validar volume de demanda antes de falar em expansão agressiva.",
+  ];
+
+  const buyingTriggers = arrayFrom(intelligence?.buying_triggers).length ? arrayFrom(intelligence?.buying_triggers) : [
+    activeTextTrigger(offer, leadCategory),
+    hasWhatsapp ? "Possui canal direto para abordagem imediata." : "Encontrar decisor ou WhatsApp antes de propor reunião.",
+    hasSite || hasInstagram ? "Já existe presença pública para personalizar a mensagem." : "Oferta pode entrar como modernização básica do processo comercial.",
+  ].filter(Boolean);
+
+  const hooks = arrayFrom(intelligence?.personalization_hooks).length ? arrayFrom(intelligence?.personalization_hooks) : [
+    reviewsCount ? `Vi que vocês têm ${reviewsCount} avaliações no Google, isso mostra que já existe movimento e demanda.` : `Vi a ${leadName} na região e queria entender como vocês captam novos clientes hoje.`,
+    hasSite ? "Notei que vocês já têm presença digital; talvez faça sentido melhorar conversão e follow-up." : "Não encontrei um site claro, então talvez exista espaço para melhorar a captação digital.",
+    offer?.name ? `Tenho uma solução específica de ${offer.name} e queria validar se faz sentido para o momento de vocês.` : "Estou validando uma solução para empresas com esse perfil e queria fazer uma pergunta rápida.",
+  ];
+
+  return { compatibility, need, financial, response, confidence, finalScore, qualificationLevel, disqualificationRisk, tags, painHypotheses, buyingTriggers, hooks };
+}
+
+function activeTextTrigger(offer?: SalesOffer | null, category?: string) {
+  const offerName = offer?.name || "sua oferta";
+  if (!offer?.name) return "Cadastrar a oferta melhora a precisão da IA e evita análise genérica.";
+  return `A oferta "${offerName}" pode ser conectada ao contexto de ${category || "negócio local"} com uma abordagem focada em dor, timing e retorno.`;
 }
 
 function DetailRow({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
@@ -528,7 +673,26 @@ export function LeadProfile() {
           reviews_count: lead.reviews_count || lead.user_ratings_total,
           cnpj: lead.cnpj || "",
           sales_offer: activeOffer,
-          analysis_mode: "offer_fit_sales_intelligence_v2",
+          requested_outputs: [
+            "compatibility_score",
+            "need_score",
+            "financial_score",
+            "response_score",
+            "confidence_score",
+            "qualification_level",
+            "disqualification_risk",
+            "strategic_tags",
+            "buying_triggers",
+            "pain_hypotheses",
+            "personalization_hooks",
+            "decision_maker_hint",
+            "first_question",
+            "approach_message"
+          ],
+          scoring_weights: { compatibility: 0.34, need: 0.26, financial: 0.2, response: 0.2 },
+          lead_raw: lead,
+          offer_raw: activeOffer,
+          analysis_mode: "offer_fit_sales_intelligence_v3",
         },
       });
 
@@ -603,7 +767,6 @@ export function LeadProfile() {
 
   const score = getScore(lead, intelligence);
   const fitScore = getFitScore(lead, intelligence);
-  const probability = getProbability(lead, intelligence);
   const temperature = getCommercialTemperature(score);
   const leadName = getLeadName(lead);
   const leadPhone = getLeadPhone(lead);
@@ -614,7 +777,6 @@ export function LeadProfile() {
   const whatsappUrl = whatsapp ? `https://wa.me/55${whatsapp.replace(/^55/, "")}?text=${encodeURIComponent(pitch)}` : "";
   const websiteUrl = normalizeWebsite(leadWebsite);
   const scan = intelligence?.website_scan || {};
-  const cnpj = intelligence?.cnpj_data || null;
   const socials = intelligence?.social_links || {};
   const instagramIntel = scan?.social_intelligence?.instagram || null;
   const instagramProfile: InstagramProfile | null = instagramIntel?.profile || socials.instagram_profile || null;
@@ -627,6 +789,15 @@ export function LeadProfile() {
   const hasWhatsapp = Boolean(scan?.has_whatsapp || leadPhone);
   const hasPixel = Boolean(scan?.has_meta_pixel);
   const hasAnalytics = Boolean(scan?.has_google_analytics || scan?.has_google_tag_manager);
+  const hasReviewsSignal = reviewsCount > 0 || Number(lead?.rating || 0) > 0;
+  const priorityLevel = getPriorityLevel(score);
+  const intentLevel = getIntentLevel(score, hasWhatsapp, hasSite, reviewsCount);
+  const analysisConfidence = getAnalysisConfidence([hasWhatsapp, hasSite, hasReviewsSignal, hasInstagram, hasOnlineScheduling, hasPixel || hasAnalytics]);
+  const searchContext = [leadCategory, getLeadCity(lead), getLeadState(lead)].filter(Boolean).join(" • ");
+  const offerFit = buildOfferFitEngine({ lead, intelligence, offer: activeOffer, hasWhatsapp, hasSite, hasInstagram, hasOnlineScheduling, hasPixel, hasAnalytics, reviewsCount });
+  const commercialScore = offerFit.finalScore || score;
+  const firstQuestion = intelligence?.first_question || `Hoje, qual é a maior dificuldade da ${leadName}: captar novos clientes, responder rápido ou converter quem chama?`;
+  const decisionMakerHint = intelligence?.decision_maker_hint || (leadCategory ? `Procure pelo dono, gestor comercial ou responsável operacional de ${leadCategory}.` : "Procure pelo dono, gestor comercial ou responsável pela operação.");
 
   const generatedOpportunities = [
     activeOffer?.name ? `Conectar a oferta "${activeOffer.name}" às dores operacionais deste negócio.` : "Cadastrar uma oferta na Busca Inteligente para personalizar o encaixe Produto x Lead.",
@@ -655,14 +826,15 @@ export function LeadProfile() {
 
   const ticket = intelligence?.ai_ticket || intelligence?.ticket_estimate || lead?.ai_ticket || (activeOffer?.price ? String(activeOffer.price) : "Não estimado");
   const offerPrice = parseMoney(activeOffer?.price || ticket);
-  const expectedRevenue = offerPrice ? Math.round(offerPrice * ((probability || Math.max(0, score - 12)) / 100)) : 0;
-  const estimatedLtv = offerPrice ? offerPrice * 12 : 0;
+  const hasFinancialProjection = Boolean(activeOffer?.name && offerPrice > 0);
+  const expectedRevenue = hasFinancialProjection ? Math.round(offerPrice * (intentLevel.score / 100)) : 0;
+  const estimatedLtv = hasFinancialProjection ? offerPrice * 12 : 0;
   const roiClients = score >= 75 ? 8 : score >= 55 ? 5 : 3;
   const averageClientTicket = leadCategory.toLowerCase().includes("barbear") ? 70 : leadCategory.toLowerCase().includes("clínic") || leadCategory.toLowerCase().includes("estética") ? 250 : 120;
   const possibleExtraRevenue = roiClients * averageClientTicket;
   const roiPercent = offerPrice ? Math.round((possibleExtraRevenue / offerPrice) * 100) : 0;
   const potential = intelligence?.potential || lead?.potential || (score >= 75 ? "Alto" : score >= 50 ? "Médio" : "Baixo");
-  const recommendation = getExecutiveRecommendation(score, probability || Math.max(0, score - 12));
+  const recommendation = getExecutiveRecommendation(score);
   const nextAction = intelligence?.ai_next_action || intelligence?.next_action || intelligence?.recommended_followup || (recommendation.label === "Prospectar agora" ? "Enviar abordagem personalizada pelo WhatsApp e propor uma demonstração rápida com foco em ganho de tempo, captação e follow-up." : "Realizar primeiro contato consultivo e validar a dor principal.");
   const reason = intelligence?.ai_reason || intelligence?.ai_fit || intelligence?.ai_summary || `Diagnóstico provisório: ${leadName} possui score ${score}/100, fit ${fitScore || score}/100 e sinais digitais que indicam ${potential.toLowerCase()} potencial. Cadastre ou atualize sua oferta para a IA refinar a análise Produto x Lead.`;
 
@@ -687,7 +859,6 @@ export function LeadProfile() {
               <Pill tone={score >= 75 ? "emerald" : score >= 50 ? "cyan" : "orange"}>{temperature}</Pill>
               <Pill tone="pink">{intelligence ? "IA analisada" : "IA pendente"}</Pill>
               {activeOffer?.name ? <Pill tone="slate">Oferta: {activeOffer.name}</Pill> : <Pill tone="orange">Oferta não cadastrada</Pill>}
-              {cnpj?.situacao ? <Pill tone="emerald">CNPJ {cnpj.situacao}</Pill> : null}
             </div>
           </div>
 
@@ -699,13 +870,13 @@ export function LeadProfile() {
             </div>
             <div>
               <p className="text-[10px] font-black uppercase text-slate-500">Fit</p>
-              <p className="mt-1 text-3xl font-black text-cyan-200">{fitScore}</p>
-              <ProgressBar value={fitScore} tone="cyan" />
+              <p className="mt-1 text-3xl font-black text-cyan-200">{fitScore || score}</p>
+              <ProgressBar value={fitScore || score} tone="cyan" />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase text-slate-500">Compra</p>
-              <p className="mt-1 text-3xl font-black text-pink-200">{probability}</p>
-              <ProgressBar value={probability} tone="pink" />
+              <p className="text-[10px] font-black uppercase text-slate-500">Prioridade</p>
+              <p className={`mt-1 text-2xl font-black ${priorityLevel.tone === "emerald" ? "text-emerald-200" : priorityLevel.tone === "orange" ? "text-orange-200" : "text-slate-300"}`}>{priorityLevel.label}</p>
+              <ProgressBar value={score} tone={priorityLevel.tone === "emerald" ? "emerald" : priorityLevel.tone === "orange" ? "orange" : "cyan"} />
             </div>
           </div>
         </div>
@@ -722,47 +893,121 @@ export function LeadProfile() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <Pill tone={recommendation.tone}>{score >= 75 ? "Prioridade comercial" : score >= 50 ? "Validar oportunidade" : "Baixa prioridade"}</Pill>
                 <Pill tone="cyan">Fit {fitScore || score}%</Pill>
-                <Pill tone="pink">Compra {probability || Math.max(0, score - 12)}%</Pill>
+                <Pill tone={intentLevel.tone}>Intenção observável: {intentLevel.label}</Pill>
+                <Pill tone="slate">Confiança {analysisConfidence}%</Pill>
                 {activeOffer?.name ? <Pill tone="emerald">Oferta conectada</Pill> : <Pill tone="orange">Oferta pendente</Pill>}
               </div>
             </div>
             <div className="min-w-[220px] rounded-2xl border border-white/10 bg-black/20 p-4">
               <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Decisão sugerida</p>
               <p className="mt-2 text-2xl font-black text-white">{score >= 70 ? "Atacar" : score >= 50 ? "Nutrir" : "Automatizar"}</p>
-              <p className="mt-1 text-xs text-slate-400">Baseado em score, fit, sinais digitais e potencial financeiro.</p>
+              <p className="mt-1 text-xs text-slate-400">Baseado em score, fit, sinais digitais e sinais públicos auditáveis.</p>
             </div>
           </div>
         </div>
 
         <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-300"><DollarSign className="h-4 w-4" /> Receita potencial da conta</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <DetailRow label="Plano indicado" value={activeOffer?.name || "Oferta"} hint={activeOffer?.price ? `Preço base ${String(activeOffer.price)}` : "Cadastre preço na oferta"} />
-            <DetailRow label="Receita esperada" value={moneyBRL(expectedRevenue)} hint="Preço x probabilidade" />
-            <DetailRow label="LTV 12 meses" value={moneyBRL(estimatedLtv)} hint="Estimativa simples" />
+          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-300"><DollarSign className="h-4 w-4" /> Projeção financeira</p>
+          {hasFinancialProjection ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <DetailRow label="Oferta usada" value={activeOffer?.name || "Oferta"} hint={`Preço base ${String(activeOffer?.price || ticket)}`} />
+              <DetailRow label="Receita ponderada" value={moneyBRL(expectedRevenue)} hint="Preço x intenção observável" />
+              <DetailRow label="LTV 12 meses" value={moneyBRL(estimatedLtv)} hint="Preço mensal x 12" />
+            </div>
+          ) : (
+            <EmptyState text="Cadastre uma oferta com preço na Busca Inteligente para habilitar projeções financeiras. Sem oferta cadastrada, a IA mostra apenas prioridade, fit e sinais auditáveis." />
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-violet-400/15 bg-[#070b12]/80 p-5 shadow-[0_0_70px_rgba(139,92,246,0.08)] backdrop-blur-xl">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-violet-300"><Brain className="h-4 w-4" /> Motor Produto x Lead</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Análise real da oferta contra este lead</h2>
+            <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-400">A IA cruza a oferta cadastrada, segmento, sinais digitais, contato, avaliações e maturidade pública para explicar por que este lead merece prioridade ou deve ser nutrido.</p>
+          </div>
+          <div className="rounded-2xl border border-violet-400/20 bg-violet-400/10 px-5 py-4 text-right">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Score comercial</p>
+            <p className="text-4xl font-black text-white">{commercialScore}</p>
+            <p className="text-xs font-bold text-violet-200">{offerFit.qualificationLevel}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Compatibilidade</span><span className="text-cyan-200">{offerFit.compatibility}%</span></div>
+              <ProgressBar value={offerFit.compatibility} tone="cyan" />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Necessidade provável</span><span className="text-emerald-200">{offerFit.need}%</span></div>
+              <ProgressBar value={offerFit.need} tone="emerald" />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Potencial financeiro</span><span className="text-orange-200">{offerFit.financial}%</span></div>
+              <ProgressBar value={offerFit.financial} tone="orange" />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Chance de resposta</span><span className="text-pink-200">{offerFit.response}%</span></div>
+              <ProgressBar value={offerFit.response} tone="pink" />
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-slate-400">
+              <span className="font-black text-white">Risco de desqualificação:</span> {offerFit.disqualificationRisk}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <InsightList title="Gatilhos de compra" icon={<Zap className="h-4 w-4" />} items={offerFit.buyingTriggers} empty="Sem gatilhos claros." tone="emerald" />
+            <InsightList title="Hipóteses de dor" icon={<AlertTriangle className="h-4 w-4" />} items={offerFit.painHypotheses} empty="Sem dores prováveis." tone="orange" />
+            <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 md:col-span-2">
+              <p className="mb-2 flex items-center gap-2 text-sm font-black text-cyan-100"><MessageCircle className="h-4 w-4" /> Pergunta de abertura recomendada</p>
+              <p className="text-sm leading-relaxed text-slate-200">{firstQuestion}</p>
+              <p className="mt-3 text-xs leading-relaxed text-slate-400"><span className="font-black text-white">Decisor provável:</span> {decisionMakerHint}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:col-span-2">
+              <p className="mb-2 text-sm font-black text-white">Hooks personalizados para mensagem</p>
+              <div className="flex flex-wrap gap-2">{offerFit.hooks.map((item, index) => <Pill key={index} tone={index === 0 ? "cyan" : index === 1 ? "pink" : "slate"}>{item}</Pill>)}</div>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={<Target className="h-5 w-5" />} label="Aderência com a oferta" value={`${fitScore || score}%`} hint="Produto x lead" tone="cyan" />
-        <MetricCard icon={<TrendingUp className="h-5 w-5" />} label="Chance comercial" value={`${probability || Math.max(0, score - 12)}%`} hint="Probabilidade estimada" tone="pink" />
-        <MetricCard icon={<DollarSign className="h-5 w-5" />} label="Ticket estimado" value={ticket} hint="Com base no perfil" tone="emerald" />
-        <MetricCard icon={<Rocket className="h-5 w-5" />} label="Potencial" value={potential} hint="Prioridade de ataque" tone="orange" />
+        <MetricCard icon={<Target className="h-5 w-5" />} label="Aderência com a oferta" value={`${offerFit.compatibility}%`} hint="Produto x sinais públicos" tone="cyan" />
+        <MetricCard icon={<TrendingUp className="h-5 w-5" />} label="Intenção observável" value={intentLevel.label} hint={intentLevel.description} tone={intentLevel.tone === "emerald" ? "emerald" : intentLevel.tone === "orange" ? "orange" : "purple"} />
+        <MetricCard icon={<ShieldCheck className="h-5 w-5" />} label="Confiança da análise" value={`${analysisConfidence}%`} hint="Volume de dados públicos encontrados" tone="emerald" />
+        <MetricCard icon={<Rocket className="h-5 w-5" />} label="Nível de oportunidade" value={priorityLevel.label} hint={priorityLevel.description} tone={priorityLevel.tone === "emerald" ? "emerald" : priorityLevel.tone === "orange" ? "orange" : "purple"} />
+      </div>
+
+      <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
+        <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><BadgeCheck className="h-5 w-5 text-cyan-300" /> Por que este lead entrou na busca?</h2>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <DetailRow label="Contexto da busca" value={searchContext || "Nicho/local não informado"} hint="Segmento e localização salvos no lead" />
+          <DetailRow label="Contato público" value={hasWhatsapp ? "Encontrado" : "Não encontrado"} hint={hasWhatsapp ? "Pronto para abordagem" : "Exige enriquecimento"} />
+          <DetailRow label="Site" value={hasSite ? "Identificado" : "Ausente"} hint={hasSite ? "Permite scanner digital" : "Oportunidade de presença digital"} />
+          <DetailRow label="Prova social" value={reviewsCount ? `${lead.rating || "—"} • ${reviewsCount} avaliações` : "Sem dados"} hint="Avaliações públicas do Google" />
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-3xl border border-orange-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><DollarSign className="h-5 w-5 text-orange-300" /> Simulador rápido de ROI</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <DetailRow label="Novos clientes/mês" value={`+${roiClients}`} hint="Estimativa conservadora" />
-            <DetailRow label="Ticket médio do lead" value={moneyBRL(averageClientTicket)} hint="Inferido pelo segmento" />
-            <DetailRow label="Receita adicional" value={moneyBRL(possibleExtraRevenue)} hint="Clientes x ticket" />
-            <DetailRow label="ROI estimado" value={offerPrice ? `${roiPercent}%` : "Sem preço"} hint="Cadastre preço da oferta para precisão" />
-          </div>
-          <p className="mt-4 rounded-2xl border border-orange-400/15 bg-orange-400/[0.06] p-3 text-sm leading-relaxed text-slate-300">
-            Use este argumento na venda: se a solução gerar apenas {roiClients} novos clientes/mês, este lead pode recuperar parte relevante do investimento e ainda ganhar organização comercial.
-          </p>
+          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><DollarSign className="h-5 w-5 text-orange-300" /> Simulador comercial defensável</h2>
+          {hasFinancialProjection ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <DetailRow label="Cenário conservador" value={`+${roiClients} clientes/mês`} hint="Hipótese para argumentação" />
+                <DetailRow label="Ticket médio do segmento" value={moneyBRL(averageClientTicket)} hint="Referência operacional, não promessa" />
+                <DetailRow label="Receita adicional possível" value={moneyBRL(possibleExtraRevenue)} hint="Clientes x ticket médio" />
+                <DetailRow label="Relação investimento/ganho" value={`${roiPercent}%`} hint="Cenário, não garantia" />
+              </div>
+              <p className="mt-4 rounded-2xl border border-orange-400/15 bg-orange-400/[0.06] p-3 text-sm leading-relaxed text-slate-300">
+                Use como argumento consultivo: se a solução gerar apenas {roiClients} novos clientes/mês, o ganho pode ajudar a justificar o investimento. Valide ticket, volume e margem na conversa.
+              </p>
+            </>
+          ) : (
+            <EmptyState text="Sem preço de oferta cadastrado, a plataforma não estima ROI. Isso evita números inventados e mantém a análise explicável para o cliente." />
+          )}
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
@@ -774,6 +1019,12 @@ export function LeadProfile() {
             <ScoreFactor label="Agendamento online" value={hasOnlineScheduling ? 5 : -12} positive={hasOnlineScheduling} />
             <ScoreFactor label="Presença social" value={hasInstagram ? 10 : -6} positive={hasInstagram} />
             <ScoreFactor label="Medição/remarketing" value={hasPixel || hasAnalytics ? 8 : -6} positive={hasPixel || hasAnalytics} />
+          </div>
+          <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] p-4 text-sm leading-relaxed text-slate-300">
+            <p className="font-black text-cyan-100">Resumo explicável da IA</p>
+            <p className="mt-2">
+              Este lead recebeu score {score}/100 porque {hasWhatsapp ? "possui telefone/WhatsApp público" : "não possui canal direto claro"}, {hasSite ? "tem site identificado" : "não possui site identificado"} e {reviewsCount > 0 ? `tem ${reviewsCount} avaliação(ões) como prova social` : "não possui prova social suficiente"}. A prioridade ficou {priorityLevel.label.toLowerCase()} porque os sinais digitais indicam {priorityLevel.description.toLowerCase()}
+            </p>
           </div>
         </div>
       </div>
@@ -788,6 +1039,11 @@ export function LeadProfile() {
           </div>
 
           <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Pill tone="cyan">Confiança da análise: {analysisConfidence}%</Pill>
+              <Pill tone={priorityLevel.tone}>Prioridade: {priorityLevel.label}</Pill>
+              <Pill tone={intentLevel.tone}>Intenção observável: {intentLevel.label}</Pill>
+            </div>
             <p className="text-sm leading-relaxed text-slate-300">{reason}</p>
           </div>
 
@@ -833,6 +1089,13 @@ export function LeadProfile() {
             <button onClick={() => copyText(pitch)} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-black text-slate-200 hover:border-cyan-400/30"><Copy className="h-4 w-4" /> Copiar</button>
           </div>
           <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">{pitch}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Pill tone="slate">Gerado por segmento</Pill>
+            {hasReviewsSignal ? <Pill tone="slate">Avaliações públicas</Pill> : null}
+            {hasSite ? <Pill tone="slate">Site analisado</Pill> : null}
+            {hasInstagram ? <Pill tone="slate">Presença social</Pill> : null}
+            {activeOffer?.name ? <Pill tone="emerald">Oferta conectada</Pill> : <Pill tone="orange">Oferta pendente</Pill>}
+          </div>
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">

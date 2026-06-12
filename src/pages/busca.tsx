@@ -86,6 +86,14 @@ type Lead = {
   ai_pitch?: string;
   ai_pain_detected?: string[];
   ai_offer_name?: string;
+  ai_need_score?: number;
+  ai_financial_capacity?: number;
+  ai_response_probability?: number;
+  ai_compatibility_reason?: string;
+  ai_disqualification_risk?: string;
+  ai_confidence?: number;
+  ai_segments_matched?: string[];
+  ai_strategy_tags?: string[];
 };
 
 type Category = {
@@ -420,8 +428,8 @@ function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
       lead.segment,
       lead.city,
       lead.address,
-      lead.website ? "tem site website digital" : "sem site",
-      lead.phone ? "tem telefone whatsapp contato" : "sem telefone",
+      lead.website ? "tem site website presenca digital empresa estruturada" : "sem site baixa presenca digital",
+      lead.phone ? "tem telefone whatsapp contato direto" : "sem telefone sem whatsapp",
     ]
       .filter(Boolean)
       .join(" ")
@@ -438,86 +446,173 @@ function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
     ].join(" ")
   );
 
+  const leadSegment = normalizeText(`${lead.segment || ""} ${lead.name || ""}`);
   const idealTerms = splitTerms(offer.idealCustomer);
   const painTerms = splitTerms(offer.painPoints);
-  const differentialTerms = splitTerms(offer.differentials);
-
+  const productTerms = splitTerms(`${offer.name} ${offer.description}`);
   const idealMatches = idealTerms.filter((term) => leadText.includes(term));
-  const painMatches = painTerms.filter(
-    (term) => leadText.includes(term) || offerText.includes(term)
-  );
+  const productMatches = productTerms.filter((term) => leadText.includes(term));
+  const painMatches = painTerms.filter((term) => leadText.includes(term));
 
-  let score = 35;
-  score += Math.min(24, idealMatches.length * 8);
-  score += Math.min(16, painMatches.length * 4);
-  score += Math.min(14, Math.round((lead.google_reviews_count || 0) / 25));
-  score += Math.min(10, Math.round((lead.google_rating || 0) * 2));
-  score += lead.phone ? 8 : -8;
-  score += lead.website ? 4 : 9;
-  score += differentialTerms.some((term) => offerText.includes(term)) ? 4 : 0;
-
-  const segment = normalizeText(lead.segment || lead.name || "");
-  const appointmentSegments = [
-    "clinica",
-    "estetica",
-    "dentista",
-    "odont",
-    "barbearia",
-    "salao",
-    "pet",
-    "veterin",
-    "academia",
-    "pilates",
-    "fisioterapia",
+  const rules = [
+    {
+      label: "agenda/atendimento",
+      offer: /whatsapp|agenda|agendamento|atendimento|crm|follow|mensagem|lead|recepcao|secretaria|ia|chatbot/,
+      segments: ["clinica", "estetica", "dent", "odont", "barbearia", "salao", "pet", "veterin", "academia", "pilates", "fisioterapia", "psicolog", "nutric", "consultorio"],
+      pains: ["perda de mensagens", "demora no atendimento", "no-show", "baixa conversao", "agenda desorganizada"],
+      reason: "negócio depende de atendimento rápido, agenda, recorrência e relacionamento com clientes.",
+    },
+    {
+      label: "mobiliário corporativo",
+      offer: /cadeira|mesa|movel|moveis|mobiliario|ergonom|poltrona|estacao de trabalho|escritorio/,
+      segments: ["escritorio", "contabilidade", "advocacia", "clinica", "consultorio", "coworking", "imobiliaria", "administr", "empresa", "corretora", "financeira", "agencia", "ti", "software"],
+      pains: ["conforto da equipe", "ergonomia", "estrutura do escritório", "renovação do ambiente"],
+      reason: "empresa com ambiente administrativo ou atendimento presencial tende a usar cadeiras, mesas e estações de trabalho.",
+    },
+    {
+      label: "marketing/vendas",
+      offer: /marketing|trafego|anuncio|google ads|meta ads|social media|site|landing|vendas|funil|crm|prospeccao/,
+      segments: ["clinica", "estetica", "dent", "advocacia", "imobiliaria", "construtora", "escola", "curso", "academia", "restaurante", "loja", "pet", "barbearia", "salao"],
+      pains: ["atração de clientes", "presença digital", "conversão", "demanda previsível"],
+      reason: "negócio local competitivo que pode aumentar demanda com aquisição digital e processo comercial.",
+    },
+    {
+      label: "limpeza/higienização",
+      offer: /limpeza|higienizacao|impermeabilizacao|estofado|sofa|colchao|tapete|carpete|lavagem/,
+      segments: ["hotel", "pousada", "clinica", "consultorio", "escola", "creche", "restaurante", "bar", "academia", "condominio", "imobiliaria", "buffet", "salao", "estetica"],
+      pains: ["higiene", "manutenção", "aparência do ambiente", "alto fluxo de pessoas"],
+      reason: "local com circulação de clientes ou uso de estofados tende a ter necessidade recorrente de limpeza.",
+    },
+    {
+      label: "energia solar/eficiência",
+      offer: /energia solar|fotovoltaica|placa solar|economia de energia|conta de luz|eficiencia energetica/,
+      segments: ["industria", "supermercado", "mercado", "hotel", "pousada", "academia", "escola", "clinica", "restaurante", "posto", "fazenda", "condominio", "galpao"],
+      pains: ["redução de custo fixo", "conta de energia", "alto consumo"],
+      reason: "operação com estrutura física e consumo relevante pode ter ganho financeiro com redução de energia.",
+    },
+    {
+      label: "sistemas/ERP/software",
+      offer: /erp|software|sistema|gestao|automacao comercial|pdv|controle financeiro|estoque|emissor|nota fiscal|saas/,
+      segments: ["loja", "mercado", "distribuidora", "restaurante", "oficina", "auto pecas", "clinica", "escola", "industria", "ecommerce", "farmacia"],
+      pains: ["controle operacional", "gestão financeira", "estoque", "processos manuais"],
+      reason: "empresa com rotina operacional, vendas, estoque ou atendimento pode ganhar controle com sistema de gestão.",
+    },
   ];
 
-  if (
-    appointmentSegments.some((term) => segment.includes(term)) &&
-    offerText.match(/whatsapp|agenda|agendamento|atendimento|follow|crm|ia/)
-  ) {
-    score += 18;
-  }
-
-  score = Math.max(12, Math.min(99, Math.round(score)));
-
-  const detectedPains: string[] = [];
-  if (!lead.website) detectedPains.push("baixa presença digital detectada");
-  if ((lead.google_reviews_count || 0) >= 80)
-    detectedPains.push("alto volume de demanda/reputação");
-  if (lead.phone) detectedPains.push("canal direto para abordagem");
-  if (appointmentSegments.some((term) => segment.includes(term)))
-    detectedPains.push("negócio dependente de agenda/recorrência");
-  if ((lead.google_rating || 0) >= 4.6)
-    detectedPains.push("boa reputação para escalar vendas");
-
-  const probability = Math.max(
-    8,
-    Math.min(96, Math.round(score * 0.82 + (lead.phone ? 8 : 0)))
+  const matchedRules = rules.filter(
+    (rule) => rule.offer.test(offerText) && rule.segments.some((term) => leadSegment.includes(term))
   );
 
-  const mainPain =
-    detectedPains[0] ||
-    idealMatches[0] ||
-    "perfil com sinais suficientes para qualificação";
+  const conflictingRules = rules.filter(
+    (rule) => rule.offer.test(offerText) && !rule.segments.some((term) => leadSegment.includes(term))
+  );
+
+  const matchedRule = matchedRules[0];
+  const hasStrongRuleMatch = matchedRules.length > 0;
+  const reviewCount = Number(lead.google_reviews_count || 0);
+  const rating = Number(lead.google_rating || 0);
+
+  let compatibility = 18;
+  compatibility += Math.min(32, idealMatches.length * 11);
+  compatibility += Math.min(18, productMatches.length * 8);
+  compatibility += hasStrongRuleMatch ? 34 : 0;
+  compatibility += lead.website ? 4 : 0;
+  compatibility += lead.phone ? 4 : 0;
+  if (!hasStrongRuleMatch && conflictingRules.length > 0 && idealMatches.length === 0 && productMatches.length === 0) {
+    compatibility -= 18;
+  }
+  compatibility = Math.max(5, Math.min(98, Math.round(compatibility)));
+
+  let need = 22;
+  need += hasStrongRuleMatch ? 36 : 0;
+  need += Math.min(18, painMatches.length * 7);
+  need += reviewCount >= 80 ? 9 : reviewCount >= 25 ? 5 : 0;
+  need += rating >= 4.5 ? 4 : 0;
+  if (!hasStrongRuleMatch && idealMatches.length === 0) need -= 10;
+  need = Math.max(5, Math.min(96, Math.round(need)));
+
+  let financial = 30;
+  financial += lead.website ? 18 : 4;
+  financial += reviewCount >= 150 ? 20 : reviewCount >= 70 ? 15 : reviewCount >= 25 ? 9 : reviewCount >= 8 ? 5 : 0;
+  financial += rating >= 4.7 ? 8 : rating >= 4.3 ? 5 : rating > 0 ? 2 : 0;
+  financial += lead.phone ? 7 : 0;
+  financial += /clinica|odont|imobiliaria|hotel|industria|advocacia|contabilidade|construtora|academia|software|empresa/.test(leadSegment) ? 10 : 0;
+  financial = Math.max(8, Math.min(95, Math.round(financial)));
+
+  let response = 24;
+  response += lead.phone ? 32 : -10;
+  response += lead.website ? 14 : 3;
+  response += rating >= 4.4 ? 7 : 0;
+  response += reviewCount >= 20 ? 7 : 0;
+  response += compatibility >= 70 ? 10 : compatibility >= 50 ? 5 : 0;
+  response = Math.max(5, Math.min(96, Math.round(response)));
+
+  const score = Math.max(
+    6,
+    Math.min(
+      99,
+      Math.round(compatibility * 0.42 + need * 0.26 + financial * 0.18 + response * 0.14)
+    )
+  );
+
+  const detectedPains: string[] = [];
+  if (matchedRule) detectedPains.push(...matchedRule.pains.slice(0, 3));
+  if (!lead.website) detectedPains.push("presença digital limitada");
+  if (reviewCount >= 80) detectedPains.push("alto volume de demanda/reputação");
+  if (lead.phone) detectedPains.push("canal direto para abordagem comercial");
+  if (rating >= 4.6) detectedPains.push("boa reputação para escalar aquisição");
+
+  const uniquePains = Array.from(new Set(detectedPains)).slice(0, 5);
+  const confidence = Math.max(
+    18,
+    Math.min(
+      98,
+      Math.round(
+        (hasStrongRuleMatch ? 40 : 10) +
+          Math.min(24, idealMatches.length * 8) +
+          (lead.phone ? 12 : 0) +
+          (lead.website ? 10 : 0) +
+          (reviewCount > 0 ? 8 : 0)
+      )
+    )
+  );
+
+  const probability = Math.max(
+    5,
+    Math.min(97, Math.round(score * 0.58 + response * 0.27 + confidence * 0.15))
+  );
+
+  const fitExplanation = hasStrongRuleMatch
+    ? matchedRule.reason
+    : idealMatches.length
+      ? `há termos do cliente ideal compatíveis com o lead: ${idealMatches.slice(0, 3).join(", ")}.`
+      : "não há sinais fortes suficientes entre a oferta e o segmento do lead; exige validação manual antes de priorizar.";
+
+  const disqualificationRisk =
+    score >= 72
+      ? "baixo: sinais comerciais suficientes para abordagem."
+      : score >= 50
+        ? "médio: abordar com pergunta de qualificação antes da oferta."
+        : "alto: baixa aderência aparente entre oferta e segmento encontrado.";
 
   const reason = [
     `${getOfferFitLabel(score)} para "${offer.name || "sua oferta"}"`,
-    idealMatches.length
-      ? `match com ICP: ${idealMatches.slice(0, 3).join(", ")}`
-      : "sem match explícito com ICP, exige validação",
-    mainPain,
+    `Compatibilidade ${compatibility}/100`,
+    `Necessidade ${need}/100`,
+    fitExplanation,
   ].join(" · ");
 
   const nextAction =
     score >= 86
-      ? "Prioridade máxima: abordar hoje com diagnóstico personalizado e oferta direta."
+      ? "Prioridade máxima: abordar hoje com diagnóstico direto, prova de valor e proposta objetiva."
       : score >= 72
-        ? "Qualificar dor principal e oferecer demonstração rápida."
+        ? "Abordar hoje validando a dor principal e oferecendo uma demonstração rápida."
         : score >= 55
-          ? "Validar operação, volume de atendimento e responsável comercial."
-          : "Manter em nutrição ou abordar somente após nichos mais quentes.";
+          ? "Qualificar antes: confirmar responsável, cenário atual e urgência da dor."
+          : "Não priorizar agora: usar apenas em nutrição ou quando os leads quentes acabarem.";
 
-  const pitch = `Olá, tudo bem? Vi a ${lead.name} e percebi um possível ponto de melhoria: ${mainPain}. Nós trabalhamos com ${offer.name || "uma solução comercial com IA"} para ${offer.description || "aumentar conversão e reduzir perda de oportunidades"}. Faz sentido eu te mostrar uma análise rápida aplicada ao seu negócio?`;
+  const mainPain = uniquePains[0] || "possível oportunidade de melhoria operacional";
+  const pitch = `Olá, tudo bem? Vi a ${lead.name} e estou fazendo uma análise rápida de empresas que podem ter aderência com ${offer.name || "minha solução"}. Pelo perfil de vocês, o ponto que mais chamou atenção foi: ${mainPain}. Faz sentido eu te mostrar em 2 minutos como isso poderia se aplicar ao negócio de vocês?`;
 
   return {
     ...lead,
@@ -529,8 +624,21 @@ function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
     ai_reason: reason,
     ai_next_action: nextAction,
     ai_pitch: pitch,
-    ai_pain_detected: detectedPains,
+    ai_pain_detected: uniquePains,
     ai_offer_name: offer.name,
+    ai_need_score: need,
+    ai_financial_capacity: financial,
+    ai_response_probability: response,
+    ai_compatibility_reason: fitExplanation,
+    ai_disqualification_risk: disqualificationRisk,
+    ai_confidence: confidence,
+    ai_segments_matched: matchedRules.map((rule) => rule.label),
+    ai_strategy_tags: [
+      compatibility >= 72 ? "oferta aderente" : "validar fit",
+      need >= 70 ? "dor provável" : "dor incerta",
+      financial >= 70 ? "bom potencial financeiro" : "ticket a validar",
+      response >= 70 ? "contato fácil" : "contato difícil",
+    ],
     status: score >= 86 ? "prioridade_ia" : score >= 72 ? "fit_alto" : score >= 55 ? "qualificar" : "nutrir",
   };
 }
@@ -1574,8 +1682,7 @@ export function Busca() {
           </h1>
 
           <p className="mt-1 text-sm text-muted-foreground">
-            Expansão semântica de termos, cobertura por categoria e deduplicação
-            automática.
+            Expansão semântica, deduplicação e ranking por compatibilidade real entre oferta, nicho e sinais comerciais.
           </p>
         </div>
 
@@ -1609,7 +1716,7 @@ export function Busca() {
               AI Sales Intelligence
             </div>
             <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-              Defina exatamente o que você vende. A IA compara sua oferta com cada empresa encontrada, gera score de aderência, probabilidade de compra, ticket estimado e abordagem personalizada.
+              Defina exatamente o que você vende. O motor cruza oferta, ICP, dores, segmento do lead, reputação, presença digital e contato para ranquear quem realmente tem chance de comprar.
             </p>
           </div>
 
@@ -1719,6 +1826,31 @@ export function Busca() {
           <MiniMetric label="Oferta" value={offer.name || "Não definida"} icon={Target} />
           <MiniMetric label="Ticket" value={offer.price || "—"} icon={DollarSign} />
           <MiniMetric label="ICP" value={offer.idealCustomer ? "Configurado" : "Pendente"} icon={Users} />
+        </div>
+
+        <div className="mt-4 rounded-xl border border-border/70 bg-background/45 p-4">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            Como o score é calculado
+          </div>
+          <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground md:grid-cols-4">
+            <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <b className="text-foreground">Compatibilidade</b>
+              <p className="mt-1">Oferta, ICP e segmento do lead precisam conversar entre si.</p>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <b className="text-foreground">Necessidade</b>
+              <p className="mt-1">A IA procura sinais de dor provável e uso real da solução.</p>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <b className="text-foreground">Potencial financeiro</b>
+              <p className="mt-1">Reputação, reviews, site e porte aparente aumentam o peso.</p>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <b className="text-foreground">Resposta</b>
+              <p className="mt-1">Telefone, presença digital e abordagem prática elevam a chance.</p>
+            </div>
+          </div>
         </div>
       </motion.div>
 
@@ -2484,6 +2616,44 @@ function LeadCard({
             icon={MessageSquareText}
           />
         </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-muted-foreground">
+          <div className="rounded-lg border border-border bg-muted/20 p-2">
+            <span className="block font-semibold text-foreground">Compatibilidade</span>
+            {lead.ai_fit_score || lead.score || 0}/100
+          </div>
+          <div className="rounded-lg border border-border bg-muted/20 p-2">
+            <span className="block font-semibold text-foreground">Necessidade</span>
+            {lead.ai_need_score ?? "—"}/100
+          </div>
+          <div className="rounded-lg border border-border bg-muted/20 p-2">
+            <span className="block font-semibold text-foreground">Potencial financeiro</span>
+            {lead.ai_financial_capacity ?? "—"}/100
+          </div>
+          <div className="rounded-lg border border-border bg-muted/20 p-2">
+            <span className="block font-semibold text-foreground">Confiança da IA</span>
+            {lead.ai_confidence ?? "—"}%
+          </div>
+        </div>
+
+        {(lead.ai_strategy_tags?.length || lead.ai_disqualification_risk) && (
+          <div className="mt-3 space-y-2">
+            {lead.ai_strategy_tags?.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {lead.ai_strategy_tags.map((tag) => (
+                  <span key={tag} className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {lead.ai_disqualification_risk ? (
+              <p className="rounded-lg border border-border bg-background/50 p-2 text-[10px] leading-relaxed text-muted-foreground">
+                <b className="text-foreground">Risco:</b> {lead.ai_disqualification_risk}
+              </p>
+            ) : null}
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
           <Button
