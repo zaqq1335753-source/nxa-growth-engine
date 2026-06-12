@@ -673,30 +673,51 @@ export function Followup() {
   }
 
   async function selectWithFallback(table: string, userId: string | null, limit = 300) {
+    /*
+      SEGURANÇA MULTI-USUÁRIO:
+      Não usamos mais fallback por business_id nem select geral.
+      Isso evitava erro, mas vazava leads antigos para usuário novo.
+      A tela de Follow-up só pode carregar registros do usuário logado.
+    */
+    if (!userId) return [];
+
     const attempts: Array<() => any> = [
-      () => supabase.from(table).select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(limit),
-      () => (userId ? supabase.from(table).select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(limit) : null),
-      () => supabase.from(table).select("*").order("created_at", { ascending: false }).limit(limit),
+      () => supabase.from(table).select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(limit),
+      () => supabase.from(table).select("*").eq("created_by", userId).order("created_at", { ascending: false }).limit(limit),
+      () => supabase.from(table).select("*").eq("owner_id", userId).order("created_at", { ascending: false }).limit(limit),
     ];
 
     let lastError: any = null;
 
     for (const attempt of attempts) {
       const query = attempt();
-      if (!query) continue;
       const { data, error } = await query;
+
       if (!error) return data || [];
+
       lastError = error;
       const missingColumn = parseMissingColumn(error);
-      if (!missingColumn) break;
+
+      // Se a coluna de dono não existir, tenta o próximo padrão seguro.
+      if (missingColumn && ["user_id", "created_by", "owner_id"].includes(missingColumn)) {
+        continue;
+      }
+
+      break;
     }
 
-    throw lastError;
+    console.warn(`Tabela ${table} sem coluna de dono do usuário. Retornando vazio para não vazar dados.`, lastError);
+    return [];
   }
 
   async function loadLeads(userId?: string | null) {
     try {
-      const data = await selectWithFallback("leads", userId || null, 250);
+      if (!userId) {
+        setLeads([]);
+        return;
+      }
+
+      const data = await selectWithFallback("leads", userId, 250);
       setLeads(Array.isArray(data) ? data.map(normalizeLead).filter((lead) => lead.id) : []);
     } catch (error) {
       console.warn("Não foi possível carregar leads para o follow-up:", error);
@@ -709,6 +730,18 @@ export function Followup() {
 
     try {
       const userId = await getSessionUserId();
+
+      if (!userId) {
+        setLeads([]);
+        setFollowups([]);
+        toast({
+          title: "Sessão não encontrada",
+          description: "Faça login novamente para carregar seus follow-ups.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       await loadLeads(userId);
 
       const data = await selectWithFallback("followups", userId, 500);
@@ -739,6 +772,7 @@ export function Followup() {
 
   async function createAppointmentFromFollowup(item: any, followupId?: string) {
     const userId = await getSessionUserId();
+    if (!userId) throw new Error("Sessão expirada. Faça login novamente.");
     const dueDate = getDateValue(item);
     const scheduled = dueDate && isValidDate(dueDate) ? new Date(dueDate) : new Date();
     const scheduledDate = scheduled.toISOString().slice(0, 10);
@@ -777,6 +811,7 @@ export function Followup() {
   async function createFollowup(payload: FollowupPayload) {
     try {
       const userId = await getSessionUserId();
+      if (!userId) throw new Error("Sessão expirada. Faça login novamente.");
       const shouldCreateAppointment = Boolean(payload.create_appointment);
       const { create_appointment, ...restPayload } = payload;
       const due = restPayload.due_date;
@@ -912,7 +947,15 @@ export function Followup() {
     if (!confirmed) return;
 
     try {
-      const { error } = await supabase.from("followups").delete().eq("id", id);
+      const userId = await getSessionUserId();
+      if (!userId) throw new Error("Sessão expirada. Faça login novamente.");
+
+      let { error } = await supabase.from("followups").delete().eq("id", id).eq("user_id", userId);
+
+      if (error && parseMissingColumn(error) === "user_id") {
+        const retry = await supabase.from("followups").delete().eq("id", id).eq("created_by", userId);
+        error = retry.error;
+      }
       if (error) throw error;
       setFollowups((prev) => prev.filter((f) => f.id !== id));
       toast({ title: "Follow-up removido." });

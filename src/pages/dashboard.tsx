@@ -356,15 +356,40 @@ function OpportunityCard({ lead, index }: { lead: any; index: number }) {
   );
 }
 
+
 export function Dashboard() {
   const [leads, setLeads] = React.useState<any[]>([]);
   const [searchHistory, setSearchHistory] = React.useState<any[]>([]);
+  const [followups, setFollowups] = React.useState<any[]>([]);
+  const [appointments, setAppointments] = React.useState<any[]>([]);
+  const [offer, setOffer] = React.useState<any | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [source, setSource] = React.useState<"Supabase" | "Cache" | "Offline">("Supabase");
   const [lastSync, setLastSync] = React.useState<string>("—");
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   const businessId = getBusinessId();
+
+  async function safeTableRead(table: string, userId: string, limit = 50) {
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.warn(`Dashboard: ${table} indisponível`, error.message);
+        return [];
+      }
+
+      return toArray(data);
+    } catch (error) {
+      console.warn(`Dashboard: falha ao consultar ${table}`, error);
+      return [];
+    }
+  }
 
   async function loadDashboardData() {
     setLoading(true);
@@ -386,18 +411,21 @@ export function Dashboard() {
       const leadsResult = await leadsQuery;
       if (leadsResult.error) throw leadsResult.error;
 
-      const historyResult = await supabase
-        .from("search_history")
-        .select("*")
-        .eq("business_id", businessId)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const [historyRows, followupRows, appointmentRows, offerRows] = await Promise.all([
+        safeTableRead("search_history", userId, 20),
+        safeTableRead("followups", userId, 100),
+        safeTableRead("appointments", userId, 100),
+        safeTableRead("sales_offers", userId, 3),
+      ]);
 
       const dbLeads = toArray(leadsResult.data);
-      const dbHistory = historyResult.error ? [] : toArray(historyResult.data);
+      const latestOffer = offerRows[0] || safeJsonParse(localStorage.getItem("nxa_active_offer"), null);
 
       setLeads(dbLeads);
-      setSearchHistory(dbHistory);
+      setSearchHistory(historyRows);
+      setFollowups(followupRows);
+      setAppointments(appointmentRows);
+      setOffer(latestOffer);
       setSource("Supabase");
       setLastSync(
         new Date().toLocaleTimeString("pt-BR", {
@@ -407,15 +435,23 @@ export function Dashboard() {
       );
 
       localStorage.setItem("nxa_dashboard_leads_cache", JSON.stringify(dbLeads));
-      localStorage.setItem("nxa_dashboard_search_history_cache", JSON.stringify(dbHistory));
+      localStorage.setItem("nxa_dashboard_search_history_cache", JSON.stringify(historyRows));
+      localStorage.setItem("nxa_dashboard_followups_cache", JSON.stringify(followupRows));
+      localStorage.setItem("nxa_dashboard_appointments_cache", JSON.stringify(appointmentRows));
+      if (latestOffer) localStorage.setItem("nxa_active_offer", JSON.stringify(latestOffer));
     } catch (error: any) {
       console.error("Erro ao carregar dashboard:", error);
 
       const cachedLeads = safeJsonParse(localStorage.getItem("nxa_dashboard_leads_cache"), []);
       const cachedHistory = safeJsonParse(localStorage.getItem("nxa_dashboard_search_history_cache"), []);
+      const cachedFollowups = safeJsonParse(localStorage.getItem("nxa_dashboard_followups_cache"), []);
+      const cachedAppointments = safeJsonParse(localStorage.getItem("nxa_dashboard_appointments_cache"), []);
 
       setLeads(toArray(cachedLeads));
       setSearchHistory(toArray(cachedHistory));
+      setFollowups(toArray(cachedFollowups));
+      setAppointments(toArray(cachedAppointments));
+      setOffer(safeJsonParse(localStorage.getItem("nxa_active_offer"), null));
       setSource(toArray(cachedLeads).length ? "Cache" : "Offline");
       setErrorMessage(error?.message || "Não foi possível carregar do banco.");
     } finally {
@@ -435,18 +471,62 @@ export function Dashboard() {
   const leadsWithoutPhone = leads.filter((lead) => !(lead?.phone || lead?.whatsapp || lead?.telefone)).length;
   const leadsWithoutWebsite = leads.filter((lead) => !(lead?.website || lead?.site)).length;
   const leadsWithWebsite = totalLeads - leadsWithoutWebsite;
+  const leadsWithPhone = totalLeads - leadsWithoutPhone;
   const avgScore = totalLeads ? Math.round(leads.reduce((acc, lead) => acc + getScore(lead), 0) / totalLeads) : 0;
   const totalSearches = searchHistory.length;
-  const estimatedRevenue = hotLeads * 399 + warmLeads * 199;
-  const conversionPotential = percentage(hotLeads + Math.round(warmLeads * 0.5), totalLeads);
+  const contactsReady = percentage(leadsWithPhone, totalLeads);
   const websiteCoverage = percentage(leadsWithWebsite, totalLeads);
-  const dataQuality = clamp(Math.round((percentage(totalLeads - leadsWithoutPhone, totalLeads) + websiteCoverage + avgScore) / 3));
+  const conversionPotential = percentage(hotLeads + Math.round(warmLeads * 0.5), totalLeads);
+  const dataQuality = clamp(Math.round((contactsReady + websiteCoverage + avgScore) / 3));
+  const pendingFollowups = followups.filter((item) => !["done", "completed", "concluido", "closed"].includes(String(item?.status || "").toLowerCase())).length;
+  const overdueFollowups = followups.filter((item) => {
+    const rawDate = item?.due_date || item?.scheduled_date || item?.date;
+    if (!rawDate) return false;
+    const due = new Date(rawDate);
+    const today = new Date();
+    due.setHours(23, 59, 59, 999);
+    return due < today && !["done", "completed", "concluido", "closed"].includes(String(item?.status || "").toLowerCase());
+  }).length;
+  const appointmentsToday = appointments.filter((item) => isToday(item?.scheduled_date || item?.start_time || item?.date)).length;
+
+  const offerPrice = React.useMemo(() => {
+    const raw = String(offer?.price || offer?.monthly_price || offer?.ticket || "").replace(/[^\d,.-]/g, "").replace(",", ".");
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 497;
+  }, [offer]);
+
+  const estimatedRevenue = hotLeads * offerPrice + warmLeads * Math.round(offerPrice * 0.45);
+  const expectedMRR = Math.round(estimatedRevenue * Math.max(conversionPotential, 8) / 100);
+  const expectedARR = expectedMRR * 12;
+  const executionScore = clamp(Math.round((dataQuality * 0.35) + (avgScore * 0.35) + (contactsReady * 0.2) + (pendingFollowups > 0 ? 10 : 0)));
+  const bestAction = hotLeads > 0
+    ? "Executar campanha nos leads quentes nas próximas 24h"
+    : warmLeads > 0
+      ? "Enriquecer leads mornos e criar follow-ups de validação"
+      : "Rodar uma busca mais específica com oferta cadastrada";
 
   const statusGroups = React.useMemo(() => groupCount(leads, getLeadStatus), [leads]);
   const topSegments = React.useMemo(() => groupCount(leads, getLeadSegment).slice(0, 6), [leads]);
   const topCities = React.useMemo(() => groupCount(leads, getLeadCity).slice(0, 6), [leads]);
   const topStates = React.useMemo(() => groupCount(leads, getLeadState).slice(0, 5), [leads]);
   const topLeads = React.useMemo(() => [...leads].sort((a, b) => getScore(b) - getScore(a)).slice(0, 8), [leads]);
+
+  const aiSegments = React.useMemo(() => {
+    return topSegments.slice(0, 4).map((segment, index) => {
+      const segmentLeads = leads.filter((lead) => getLeadSegment(lead) === segment.label);
+      const avg = segmentLeads.length
+        ? Math.round(segmentLeads.reduce((acc, lead) => acc + getScore(lead), 0) / segmentLeads.length)
+        : 0;
+      const revenue = segmentLeads.filter((lead) => getScore(lead) >= 80).length * offerPrice + Math.round(segmentLeads.filter((lead) => getScore(lead) >= 61 && getScore(lead) < 80).length * offerPrice * 0.45);
+
+      return {
+        ...segment,
+        avg,
+        revenue,
+        priority: index === 0 ? "Ataque principal" : avg >= 75 ? "Alta prioridade" : "Nutrição",
+      };
+    });
+  }, [topSegments, leads, offerPrice]);
 
   const lastSevenDays = React.useMemo(() => {
     const days = Array.from({ length: 7 }, (_, index) => {
@@ -474,78 +554,130 @@ export function Dashboard() {
 
     return [
       {
-        title: "Prioridade comercial",
-        value: `${hotLeads} leads quentes`,
-        text: hotLeads > 0 ? "Comece pelos leads acima de 80 de score antes de abrir novas buscas." : "Ainda não existem leads quentes suficientes. Rode uma nova busca mais segmentada.",
+        title: "Comando de ataque",
+        value: hotLeads > 0 ? `${hotLeads} leads prontos` : "Gerar demanda",
+        text: hotLeads > 0 ? "Priorize contato consultivo com pitch personalizado antes de abrir novas listas." : "Ainda faltam leads com score alto. Use uma oferta mais específica na Busca Inteligente.",
         icon: <Flame className="h-5 w-5" />,
         tone: "text-orange-400",
       },
       {
+        title: "Oferta ativa",
+        value: offer?.name || offer?.title || "Não cadastrada",
+        text: offer ? `Análise orientada para ticket de ${moneyFormat(offerPrice)}.` : "Cadastre sua oferta na Busca Inteligente para o dashboard calcular encaixe real.",
+        icon: <Target className="h-5 w-5" />,
+        tone: "text-primary",
+      },
+      {
         title: "Segmento dominante",
         value: bestSegment,
-        text: `${segmentShare}% da base está concentrada nesse segmento. Crie uma oferta específica para ele.`,
+        text: `${segmentShare}% da base está concentrada nesse segmento. Crie copy e follow-up específicos para ele.`,
         icon: <Layers3 className="h-5 w-5" />,
         tone: "text-primary",
       },
       {
         title: "Praça mais forte",
         value: bestCity,
-        text: `${cityShare}% das oportunidades estão nessa cidade. Vale uma campanha local dedicada.`,
+        text: `${cityShare}% das oportunidades estão nessa cidade. Vale campanha local dedicada.`,
         icon: <MapPin className="h-5 w-5" />,
         tone: "text-blue-400",
       },
       {
-        title: "Qualidade da base",
-        value: `${dataQuality}%`,
-        text: leadsWithoutPhone > 0 ? `${leadsWithoutPhone} leads ainda estão sem telefone. Priorize enriquecimento.` : "Base com boa cobertura de contato para prospecção.",
-        icon: <ShieldCheck className="h-5 w-5" />,
+        title: "Próxima melhor ação",
+        value: bestAction,
+        text: "A IA usa score, qualidade de dados, follow-ups e oferta para sugerir foco operacional.",
+        icon: <Zap className="h-5 w-5" />,
         tone: "text-emerald-400",
       },
+      {
+        title: "Risco operacional",
+        value: overdueFollowups > 0 ? `${overdueFollowups} atrasado(s)` : "Sob controle",
+        text: overdueFollowups > 0 ? "Follow-ups atrasados reduzem conversão. Execute ou reagende hoje." : "Nenhum follow-up atrasado detectado.",
+        icon: <AlertTriangle className="h-5 w-5" />,
+        tone: overdueFollowups > 0 ? "text-red-400" : "text-emerald-400",
+      },
     ];
-  }, [hotLeads, topSegments, topCities, totalLeads, dataQuality, leadsWithoutPhone]);
+  }, [hotLeads, topSegments, topCities, totalLeads, offer, offerPrice, bestAction, overdueFollowups]);
 
   const recentSearches = searchHistory.slice(0, 6);
 
+  const actionQueue = [
+    {
+      title: "Atacar leads quentes",
+      value: `${hotLeads} oportunidades`,
+      text: "Contatar primeiro os leads com maior NXA Score e telefone disponível.",
+      href: "/leads",
+      icon: <Flame className="h-5 w-5" />,
+      tone: "border-orange-500/20 bg-orange-500/10 text-orange-300",
+    },
+    {
+      title: "Criar follow-ups pendentes",
+      value: `${Math.max(hotLeads - pendingFollowups, 0)} sugeridos`,
+      text: "Transforme oportunidades com score alto em tarefas comerciais.",
+      href: "/followup",
+      icon: <Clock className="h-5 w-5" />,
+      tone: "border-primary/20 bg-primary/10 text-primary",
+    },
+    {
+      title: "Refinar oferta",
+      value: offer ? "Oferta ativa" : "Obrigatório",
+      text: offer ? "Use os segmentos vencedores para ajustar promessa e abordagem." : "Cadastre o produto para ativar análise produto x lead.",
+      href: "/busca",
+      icon: <Sparkles className="h-5 w-5" />,
+      tone: "border-purple-500/20 bg-purple-500/10 text-purple-300",
+    },
+  ];
+
   return (
     <div className="space-y-6 pb-10">
-      <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-6 lg:p-8 shadow-[0_0_80px_rgba(0,255,255,0.06)]">
+      <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-[radial-gradient(circle_at_top_right,rgba(0,255,255,0.16),transparent_34%),linear-gradient(135deg,rgba(0,255,255,0.08),rgba(15,23,42,0.18),rgba(168,85,247,0.10))] p-6 lg:p-8 shadow-[0_0_110px_rgba(0,255,255,0.08)]">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute -bottom-32 -left-32 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
 
         <div className="relative flex items-start justify-between gap-6 flex-col xl:flex-row">
-          <div className="max-w-3xl">
+          <div className="max-w-4xl">
             <div className="flex items-center gap-2 mb-4 flex-wrap">
               <Badge className="bg-primary/10 text-primary border-primary/20">
                 <Command className="h-3.5 w-3.5 mr-1" />
-                NXA Command Center
+                NXA AI Revenue Command
               </Badge>
               <Badge variant="outline">Fonte: {source}</Badge>
               <Badge variant="outline">Sync: {lastSync}</Badge>
               <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                <Signal className="h-3.5 w-3.5 mr-1" />
-                Lead OS Ativo
+                <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                Dados isolados por usuário
+              </Badge>
+              <Badge className={offer ? "bg-purple-500/10 text-purple-300 border-purple-500/20" : "bg-orange-500/10 text-orange-300 border-orange-500/20"}>
+                <Sparkles className="h-3.5 w-3.5 mr-1" />
+                {offer ? "Oferta IA ativa" : "Oferta IA pendente"}
               </Badge>
             </div>
 
-            <h1 className="text-4xl lg:text-5xl font-black tracking-tight">
-              Dashboard Executivo NXA
+            <h1 className="text-4xl lg:text-6xl font-black tracking-tight">
+              Dashboard Executivo de Receita
             </h1>
-            <p className="text-muted-foreground mt-3 text-base lg:text-lg max-w-2xl">
-              Central premium de inteligência comercial com leads, buscas, score, oportunidades, CRM, dados por cidade, segmentos e saúde da operação.
+            <p className="text-muted-foreground mt-3 text-base lg:text-lg max-w-3xl">
+              Central avançada para decidir onde vender, quem atacar primeiro, quanto existe de receita potencial e quais ações comerciais a IA recomenda agora.
             </p>
 
-            <div className="grid gap-3 sm:grid-cols-3 mt-6 max-w-3xl">
-              <div className="rounded-2xl border border-border bg-background/50 p-4">
-                <p className="text-xs text-muted-foreground">Receita potencial</p>
-                <p className="text-2xl font-black mt-1">{moneyFormat(estimatedRevenue)}</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mt-6 max-w-5xl">
+              <div className="rounded-2xl border border-primary/20 bg-background/50 p-4">
+                <p className="text-xs text-muted-foreground">Score de execução</p>
+                <p className="text-3xl font-black mt-1 text-primary">{executionScore}%</p>
+                <p className="text-[11px] text-muted-foreground mt-1">Prontidão comercial</p>
               </div>
-              <div className="rounded-2xl border border-border bg-background/50 p-4">
-                <p className="text-xs text-muted-foreground">Potencial de conversão</p>
-                <p className="text-2xl font-black mt-1">{conversionPotential}%</p>
+              <div className="rounded-2xl border border-emerald-500/20 bg-background/50 p-4">
+                <p className="text-xs text-muted-foreground">MRR esperado</p>
+                <p className="text-3xl font-black mt-1 text-emerald-300">{moneyFormat(expectedMRR)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">Baseado no score atual</p>
               </div>
-              <div className="rounded-2xl border border-border bg-background/50 p-4">
-                <p className="text-xs text-muted-foreground">Qualidade da base</p>
-                <p className="text-2xl font-black mt-1">{dataQuality}%</p>
+              <div className="rounded-2xl border border-orange-500/20 bg-background/50 p-4">
+                <p className="text-xs text-muted-foreground">Receita em pipeline</p>
+                <p className="text-3xl font-black mt-1 text-orange-300">{moneyFormat(estimatedRevenue)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">Leads quentes + mornos</p>
+              </div>
+              <div className="rounded-2xl border border-purple-500/20 bg-background/50 p-4">
+                <p className="text-xs text-muted-foreground">Próxima ação IA</p>
+                <p className="text-sm font-black mt-2 leading-tight">{bestAction}</p>
               </div>
             </div>
           </div>
@@ -557,7 +689,7 @@ export function Dashboard() {
             </Button>
             <Link href="/busca">
               <Button className="shadow-[0_0_28px_rgba(0,255,255,0.18)]">
-                Nova busca
+                Nova busca IA
                 <Search className="h-4 w-4 ml-2" />
               </Button>
             </Link>
@@ -580,61 +712,94 @@ export function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Total de leads" value={numberFormat(totalLeads)} helper="Leads salvos no banco" trend={`${newToday} hoje`} icon={<Users className="h-5 w-5" />} tone="primary" />
         <KpiCard label="Leads quentes" value={numberFormat(hotLeads)} helper="Score igual ou acima de 80" icon={<Flame className="h-5 w-5" />} tone="orange" />
-        <KpiCard label="Score médio" value={avgScore} helper="Média da base importada" icon={<Gauge className="h-5 w-5" />} tone="green" />
-        <KpiCard label="Buscas recentes" value={numberFormat(totalSearches)} helper="Histórico salvo no banco" icon={<Search className="h-5 w-5" />} tone="blue" />
-        <KpiCard label="Sem telefone" value={numberFormat(leadsWithoutPhone)} helper="Exigem enriquecimento" icon={<MessageSquare className="h-5 w-5" />} tone="red" />
-        <KpiCard label="Sem website" value={numberFormat(leadsWithoutWebsite)} helper="Alta chance de venda de presença digital" icon={<Globe2 className="h-5 w-5" />} tone="purple" />
-        <KpiCard label="Cobertura de site" value={`${websiteCoverage}%`} helper="Empresas com website detectado" icon={<BarChart3 className="h-5 w-5" />} tone="green" />
-        <KpiCard label="Receita potencial" value={moneyFormat(estimatedRevenue)} helper="Estimativa por score comercial" icon={<CircleDollarSign className="h-5 w-5" />} tone="orange" />
+        <KpiCard label="MRR esperado" value={moneyFormat(expectedMRR)} helper="Forecast ponderado por score" icon={<CircleDollarSign className="h-5 w-5" />} tone="green" />
+        <KpiCard label="Score médio" value={avgScore} helper="Média da base importada" icon={<Gauge className="h-5 w-5" />} tone="blue" />
+        <KpiCard label="Follow-ups abertos" value={numberFormat(pendingFollowups)} helper={`${overdueFollowups} atrasado(s)`} icon={<Clock className="h-5 w-5" />} tone={overdueFollowups > 0 ? "red" : "green"} />
+        <KpiCard label="Agenda hoje" value={numberFormat(appointmentsToday)} helper="Compromissos comerciais" icon={<BellRing className="h-5 w-5" />} tone="purple" />
+        <KpiCard label="Contatos prontos" value={`${contactsReady}%`} helper={`${leadsWithPhone} leads com telefone`} icon={<MessageSquare className="h-5 w-5" />} tone="green" />
+        <KpiCard label="ARR projetado" value={moneyFormat(expectedARR)} helper="Projeção anual do pipeline" icon={<TrendingUp className="h-5 w-5" />} tone="orange" />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-4">
-        <Card className="xl:col-span-3 bg-card/50 backdrop-blur-xl border-card-border overflow-hidden">
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2 bg-card/50 backdrop-blur-xl border-card-border overflow-hidden">
           <CardHeader>
-            <SectionTitle icon={<Bot className="h-5 w-5" />} title="NXA Intelligence Briefing" subtitle="Insights automáticos para vender mais rápido" />
+            <SectionTitle icon={<Bot className="h-5 w-5" />} title="Executive AI Briefing" subtitle="O que o vendedor precisa saber agora" />
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {insightCards.map((item) => (
               <div key={item.title} className="rounded-2xl border border-border bg-background/40 p-4">
                 <div className={`h-10 w-10 rounded-xl bg-muted flex items-center justify-center ${item.tone}`}>
                   {item.icon}
                 </div>
                 <p className="text-xs text-muted-foreground mt-4">{item.title}</p>
-                <p className="text-lg font-black mt-1 truncate">{item.value}</p>
+                <p className="text-lg font-black mt-1 line-clamp-2">{item.value}</p>
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{item.text}</p>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        <Card className="bg-red-500/5 border-red-500/20">
+        <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-300">
-              <BellRing className="h-5 w-5" />
-              Requires Attention
-            </CardTitle>
+            <SectionTitle icon={<Target className="h-5 w-5" />} title="Oferta usada pela IA" subtitle="Produto x lead x receita" />
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
-              <p className="text-sm font-bold text-red-200">{leadsWithoutPhone} leads sem telefone</p>
-              <p className="text-xs text-red-200/70 mt-1">Priorize enriquecimento antes da prospecção.</p>
+            <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4">
+              <p className="text-xs text-muted-foreground">Oferta ativa</p>
+              <p className="text-xl font-black mt-1">{offer?.name || offer?.title || "Oferta não cadastrada"}</p>
+              <p className="text-xs text-muted-foreground mt-2 line-clamp-3">
+                {offer?.description || offer?.summary || "Cadastre sua oferta na Busca Inteligente para ativar análise de encaixe, pitch, ROI e priorização por ICP."}
+              </p>
             </div>
-            <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
-              <p className="text-sm font-bold text-orange-200">{leadsWithoutWebsite} leads sem site</p>
-              <p className="text-xs text-orange-200/70 mt-1">Oportunidade para oferta de automação e presença digital.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">Ticket</p>
+                <p className="font-black">{moneyFormat(offerPrice)}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">ICP detectado</p>
+                <p className="font-black truncate">{topSegments[0]?.label || "—"}</p>
+              </div>
             </div>
-            <div className="rounded-xl border border-primary/20 bg-primary/10 p-3">
-              <p className="text-sm font-bold text-primary">{hotLeads} leads acima de 80</p>
-              <p className="text-xs text-muted-foreground mt-1">Execute contato em até 24h.</p>
-            </div>
+            <Link href="/busca">
+              <Button variant="outline" className="w-full">
+                Ajustar oferta IA
+                <Sparkles className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
+        {actionQueue.map((action) => (
+          <Card key={action.title} className={`border ${action.tone}`}>
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="h-11 w-11 rounded-2xl border border-current/20 bg-background/30 flex items-center justify-center mb-4">
+                    {action.icon}
+                  </div>
+                  <p className="text-sm text-current/80">{action.title}</p>
+                  <p className="text-2xl font-black mt-1 text-foreground">{action.value}</p>
+                  <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{action.text}</p>
+                </div>
+                <Link href={action.href}>
+                  <Button size="sm" variant="outline" className="bg-background/40">
+                    Abrir
+                    <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2 bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<LineChart className="h-5 w-5" />} title="Crescimento de leads" subtitle="Leads importados nos últimos 7 dias" />
+            <SectionTitle icon={<LineChart className="h-5 w-5" />} title="Crescimento e tração" subtitle="Leads importados nos últimos 7 dias" />
           </CardHeader>
           <CardContent>
             <MiniBarChart data={lastSevenDays} />
@@ -643,7 +808,7 @@ export function Dashboard() {
 
         <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<PieChart className="h-5 w-5" />} title="Distribuição por temperatura" subtitle="Classificação por NXA Score" />
+            <SectionTitle icon={<PieChart className="h-5 w-5" />} title="Temperatura comercial" subtitle="Classificação por NXA Score" />
           </CardHeader>
           <CardContent className="space-y-3">
             <ProgressRow label="Quentes" value={hotLeads} total={totalLeads} badge="80+" />
@@ -655,7 +820,7 @@ export function Dashboard() {
 
       <Card className="bg-card/50 backdrop-blur-xl border-card-border">
         <CardHeader>
-          <SectionTitle icon={<BriefcaseBusiness className="h-5 w-5" />} title="Pipeline Comercial" subtitle="Visão CRM por status dos leads" />
+          <SectionTitle icon={<BriefcaseBusiness className="h-5 w-5" />} title="Pipeline Comercial OS" subtitle="Visão CRM com forecast, status e gargalos" />
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <PipelineColumn label="Novos" value={statusGroups.find((item) => item.label === "new")?.value || totalLeads} total={totalLeads} tone="bg-blue-400" />
@@ -670,14 +835,14 @@ export function Dashboard() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<Flame className="h-5 w-5" />} title="Top oportunidades" subtitle="Leads com maior probabilidade comercial" />
+            <SectionTitle icon={<Flame className="h-5 w-5" />} title="Top oportunidades para atacar" subtitle="Leads com maior probabilidade comercial" />
           </CardHeader>
           <CardContent className="space-y-3">
             {topLeads.length === 0 && <p className="text-sm text-muted-foreground">Nenhum lead encontrado.</p>}
             {topLeads.map((lead, index) => <OpportunityCard key={lead.id || index} lead={lead} index={index} />)}
             <Link href="/leads">
               <Button variant="outline" className="w-full mt-2">
-                Ver todos os leads
+                Ver central de leads
                 <ArrowUpRight className="h-4 w-4 ml-2" />
               </Button>
             </Link>
@@ -686,7 +851,42 @@ export function Dashboard() {
 
         <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<Activity className="h-5 w-5" />} title="Histórico inteligente de buscas" subtitle="Últimas pesquisas executadas" />
+            <SectionTitle icon={<Radar className="h-5 w-5" />} title="Matriz de segmentos IA" subtitle="Onde existe mais dinheiro e aderência" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {aiSegments.length === 0 && (
+              <div className="rounded-2xl border border-border p-6 text-center">
+                <Layers3 className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                <p className="font-semibold">Sem segmentos suficientes.</p>
+                <p className="text-sm text-muted-foreground mt-1">Execute buscas segmentadas para alimentar a matriz.</p>
+              </div>
+            )}
+            {aiSegments.map((item) => (
+              <div key={item.label} className="rounded-2xl border border-border bg-background/40 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-black truncate">{item.label}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{item.value} leads • score médio {item.avg}</p>
+                    <Badge className="mt-3 bg-primary/10 text-primary border-primary/20">{item.priority}</Badge>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-muted-foreground">Pipeline</p>
+                    <p className="font-black text-emerald-300">{moneyFormat(item.revenue)}</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <ProgressRow label="Força do segmento" value={item.avg} total={100} badge={`${item.avg}%`} />
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card className="bg-card/50 backdrop-blur-xl border-card-border">
+          <CardHeader>
+            <SectionTitle icon={<Activity className="h-5 w-5" />} title="Histórico inteligente" subtitle="Últimas pesquisas executadas" />
           </CardHeader>
           <CardContent className="space-y-3">
             {recentSearches.length === 0 && (
@@ -710,30 +910,12 @@ export function Dashboard() {
                 </div>
               </div>
             ))}
-            <Link href="/busca">
-              <Button variant="outline" className="w-full mt-2">
-                Nova busca inteligente
-                <ChevronRight className="h-4 w-4 ml-2" />
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="bg-card/50 backdrop-blur-xl border-card-border">
-          <CardHeader>
-            <SectionTitle icon={<Layers3 className="h-5 w-5" />} title="Segmentos mais fortes" subtitle="Onde o banco tem mais volume" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {topSegments.length === 0 && <p className="text-sm text-muted-foreground">Nenhum segmento encontrado.</p>}
-            {topSegments.map((item) => <ProgressRow key={item.label} label={item.label} value={item.value} total={totalLeads} />)}
           </CardContent>
         </Card>
 
         <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<MapPin className="h-5 w-5" />} title="Cidades com mais leads" subtitle="Praças com maior concentração" />
+            <SectionTitle icon={<MapPin className="h-5 w-5" />} title="Praças mais fortes" subtitle="Cidades com maior concentração" />
           </CardHeader>
           <CardContent className="space-y-3">
             {topCities.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma cidade encontrada.</p>}
@@ -743,50 +925,42 @@ export function Dashboard() {
 
         <Card className="bg-card/50 backdrop-blur-xl border-card-border">
           <CardHeader>
-            <SectionTitle icon={<Building2 className="h-5 w-5" />} title="Estados monitorados" subtitle="Distribuição geográfica" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {topStates.length === 0 && <p className="text-sm text-muted-foreground">Nenhum estado encontrado.</p>}
-            {topStates.map((item) => <ProgressRow key={item.label} label={item.label} value={item.value} total={totalLeads} />)}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="bg-card/50 backdrop-blur-xl border-card-border">
-          <CardHeader>
-            <SectionTitle icon={<Wallet className="h-5 w-5" />} title="Financeiro SaaS" subtitle="Pronto para visão de venda" />
+            <SectionTitle icon={<Wallet className="h-5 w-5" />} title="Financeiro SaaS" subtitle="Forecast comercial para venda" />
           </CardHeader>
           <CardContent className="grid gap-3">
             <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between">
-              <span className="text-sm text-muted-foreground">MRR estimado</span>
-              <strong>{moneyFormat(Math.round(estimatedRevenue * 0.12))}</strong>
+              <span className="text-sm text-muted-foreground">Pipeline bruto</span>
+              <strong>{moneyFormat(estimatedRevenue)}</strong>
             </div>
             <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between">
-              <span className="text-sm text-muted-foreground">ARR estimado</span>
-              <strong>{moneyFormat(Math.round(estimatedRevenue * 0.12 * 12))}</strong>
+              <span className="text-sm text-muted-foreground">MRR esperado</span>
+              <strong>{moneyFormat(expectedMRR)}</strong>
             </div>
             <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between">
-              <span className="text-sm text-muted-foreground">Ticket sugerido</span>
-              <strong>R$ 299–999</strong>
+              <span className="text-sm text-muted-foreground">ARR esperado</span>
+              <strong>{moneyFormat(expectedARR)}</strong>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="xl:col-span-2 bg-card/50 backdrop-blur-xl border-card-border">
-          <CardHeader>
-            <SectionTitle icon={<Database className="h-5 w-5" />} title="Saúde da infraestrutura" subtitle="Status comercial das integrações principais" />
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            <SystemPill label="Supabase" ok={source === "Supabase"} detail={source === "Supabase" ? "Banco respondendo" : "Usando fallback/cache"} />
-            <SystemPill label="Google Places" ok={totalLeads > 0 || totalSearches > 0} detail="Edge Function configurada" />
-            <SystemPill label="NXA Lead OS" ok={true} detail="Importação e deduplicação ativas" />
-            <SystemPill label="Créditos" ok={true} detail="Controle preparado para cobrança" />
-            <SystemPill label="CRM" ok={true} detail="Pipeline pronto para status" />
-            <SystemPill label="IA Insights" ok={true} detail="Regras comerciais ativas" />
+            <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between">
+              <span className="text-sm text-muted-foreground">Ticket usado</span>
+              <strong>{moneyFormat(offerPrice)}</strong>
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card className="bg-card/50 backdrop-blur-xl border-card-border">
+        <CardHeader>
+          <SectionTitle icon={<Database className="h-5 w-5" />} title="Saúde da infraestrutura comercial" subtitle="Status operacional das integrações principais" />
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <SystemPill label="Supabase" ok={source === "Supabase"} detail={source === "Supabase" ? "Banco respondendo" : "Usando fallback/cache"} />
+          <SystemPill label="Google Places" ok={totalLeads > 0 || totalSearches > 0} detail="Edge Function configurada" />
+          <SystemPill label="NXA Lead OS" ok={true} detail="Importação, score e deduplicação ativos" />
+          <SystemPill label="Oferta IA" ok={Boolean(offer)} detail={offer ? "Produto usado nas análises" : "Cadastre a oferta na busca"} />
+          <SystemPill label="Follow-up Center" ok={overdueFollowups === 0} detail={overdueFollowups > 0 ? `${overdueFollowups} pendente(s) atrasado(s)` : "Sem atrasos críticos"} />
+          <SystemPill label="CRM" ok={true} detail="Pipeline pronto para status e forecast" />
+        </CardContent>
+      </Card>
     </div>
   );
 }

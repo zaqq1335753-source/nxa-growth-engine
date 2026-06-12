@@ -31,6 +31,11 @@ import {
   ShieldCheck,
   ExternalLink,
   ArrowUpRight,
+  Wand2,
+  DollarSign,
+  Users,
+  Lightbulb,
+  Gauge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +53,16 @@ const MIN_CREDITS_TO_SEARCH = 1;
 
 type Mode = "catalogo" | "custom";
 
+type SalesOffer = {
+  name: string;
+  description: string;
+  price: string;
+  idealCustomer: string;
+  painPoints: string;
+  differentials: string;
+  objections: string;
+};
+
 type Lead = {
   id: string;
   name: string;
@@ -62,6 +77,15 @@ type Lead = {
   google_reviews_count?: number;
   score: number;
   status: string;
+  ai_fit_score?: number;
+  ai_purchase_probability?: number;
+  ai_ticket_estimate?: string;
+  ai_fit_label?: string;
+  ai_reason?: string;
+  ai_next_action?: string;
+  ai_pitch?: string;
+  ai_pain_detected?: string[];
+  ai_offer_name?: string;
 };
 
 type Category = {
@@ -327,6 +351,191 @@ function capitalizeWords(value: string) {
 }
 
 
+const DEFAULT_SALES_OFFER: SalesOffer = {
+  name: "Automação WhatsApp com IA",
+  description:
+    "Atendimento automático com IA para responder leads, organizar contatos, agendar horários e recuperar oportunidades perdidas.",
+  price: "R$497/mês",
+  idealCustomer:
+    "Clínicas, estética, odontologia, barbearias, salões, pet shops e negócios que dependem de WhatsApp, agenda e recorrência.",
+  painPoints:
+    "Demora para responder, perda de mensagens, agenda desorganizada, no-show, falta de follow-up e baixa conversão no WhatsApp.",
+  differentials:
+    "IA 24h, agendamento automático, follow-up inteligente, CRM, análise de leads, priorização comercial e mensagens personalizadas.",
+  objections:
+    "Já tenho alguém respondendo, estou sem tempo, acho caro, não sei se IA funciona para meu negócio.",
+};
+
+function readSalesOfferStorage(): SalesOffer {
+  try {
+    const raw = localStorage.getItem("nxa_sales_offer_v2");
+    if (!raw) return DEFAULT_SALES_OFFER;
+    return { ...DEFAULT_SALES_OFFER, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_SALES_OFFER;
+  }
+}
+
+function writeSalesOfferStorage(offer: SalesOffer) {
+  try {
+    localStorage.setItem("nxa_sales_offer_v2", JSON.stringify(offer));
+  } catch {
+    // localStorage indisponível não deve travar a busca
+  }
+}
+
+function splitTerms(value: string) {
+  return normalizeText(value)
+    .split(/[,;\n\.]+|\s+e\s+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 3);
+}
+
+function estimateTicketFromOffer(offer: SalesOffer, score: number) {
+  const price = offer.price?.trim();
+
+  if (price) {
+    if (score >= 85) return `${price} ou plano superior`;
+    if (score >= 70) return price;
+    return `Entrada/teste até ${price}`;
+  }
+
+  if (score >= 85) return "Alto";
+  if (score >= 70) return "Médio/alto";
+  if (score >= 50) return "Médio";
+  return "Baixo";
+}
+
+function getOfferFitLabel(score: number) {
+  if (score >= 86) return "Fit premium";
+  if (score >= 72) return "Alta aderência";
+  if (score >= 55) return "Precisa qualificar";
+  return "Baixa prioridade";
+}
+
+function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
+  const leadText = normalizeText(
+    [
+      lead.name,
+      lead.segment,
+      lead.city,
+      lead.address,
+      lead.website ? "tem site website digital" : "sem site",
+      lead.phone ? "tem telefone whatsapp contato" : "sem telefone",
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  const offerText = normalizeText(
+    [
+      offer.name,
+      offer.description,
+      offer.idealCustomer,
+      offer.painPoints,
+      offer.differentials,
+      offer.objections,
+    ].join(" ")
+  );
+
+  const idealTerms = splitTerms(offer.idealCustomer);
+  const painTerms = splitTerms(offer.painPoints);
+  const differentialTerms = splitTerms(offer.differentials);
+
+  const idealMatches = idealTerms.filter((term) => leadText.includes(term));
+  const painMatches = painTerms.filter(
+    (term) => leadText.includes(term) || offerText.includes(term)
+  );
+
+  let score = 35;
+  score += Math.min(24, idealMatches.length * 8);
+  score += Math.min(16, painMatches.length * 4);
+  score += Math.min(14, Math.round((lead.google_reviews_count || 0) / 25));
+  score += Math.min(10, Math.round((lead.google_rating || 0) * 2));
+  score += lead.phone ? 8 : -8;
+  score += lead.website ? 4 : 9;
+  score += differentialTerms.some((term) => offerText.includes(term)) ? 4 : 0;
+
+  const segment = normalizeText(lead.segment || lead.name || "");
+  const appointmentSegments = [
+    "clinica",
+    "estetica",
+    "dentista",
+    "odont",
+    "barbearia",
+    "salao",
+    "pet",
+    "veterin",
+    "academia",
+    "pilates",
+    "fisioterapia",
+  ];
+
+  if (
+    appointmentSegments.some((term) => segment.includes(term)) &&
+    offerText.match(/whatsapp|agenda|agendamento|atendimento|follow|crm|ia/)
+  ) {
+    score += 18;
+  }
+
+  score = Math.max(12, Math.min(99, Math.round(score)));
+
+  const detectedPains: string[] = [];
+  if (!lead.website) detectedPains.push("baixa presença digital detectada");
+  if ((lead.google_reviews_count || 0) >= 80)
+    detectedPains.push("alto volume de demanda/reputação");
+  if (lead.phone) detectedPains.push("canal direto para abordagem");
+  if (appointmentSegments.some((term) => segment.includes(term)))
+    detectedPains.push("negócio dependente de agenda/recorrência");
+  if ((lead.google_rating || 0) >= 4.6)
+    detectedPains.push("boa reputação para escalar vendas");
+
+  const probability = Math.max(
+    8,
+    Math.min(96, Math.round(score * 0.82 + (lead.phone ? 8 : 0)))
+  );
+
+  const mainPain =
+    detectedPains[0] ||
+    idealMatches[0] ||
+    "perfil com sinais suficientes para qualificação";
+
+  const reason = [
+    `${getOfferFitLabel(score)} para "${offer.name || "sua oferta"}"`,
+    idealMatches.length
+      ? `match com ICP: ${idealMatches.slice(0, 3).join(", ")}`
+      : "sem match explícito com ICP, exige validação",
+    mainPain,
+  ].join(" · ");
+
+  const nextAction =
+    score >= 86
+      ? "Prioridade máxima: abordar hoje com diagnóstico personalizado e oferta direta."
+      : score >= 72
+        ? "Qualificar dor principal e oferecer demonstração rápida."
+        : score >= 55
+          ? "Validar operação, volume de atendimento e responsável comercial."
+          : "Manter em nutrição ou abordar somente após nichos mais quentes.";
+
+  const pitch = `Olá, tudo bem? Vi a ${lead.name} e percebi um possível ponto de melhoria: ${mainPain}. Nós trabalhamos com ${offer.name || "uma solução comercial com IA"} para ${offer.description || "aumentar conversão e reduzir perda de oportunidades"}. Faz sentido eu te mostrar uma análise rápida aplicada ao seu negócio?`;
+
+  return {
+    ...lead,
+    score,
+    ai_fit_score: score,
+    ai_purchase_probability: probability,
+    ai_ticket_estimate: estimateTicketFromOffer(offer, score),
+    ai_fit_label: getOfferFitLabel(score),
+    ai_reason: reason,
+    ai_next_action: nextAction,
+    ai_pitch: pitch,
+    ai_pain_detected: detectedPains,
+    ai_offer_name: offer.name,
+    status: score >= 86 ? "prioridade_ia" : score >= 72 ? "fit_alto" : score >= 55 ? "qualificar" : "nutrir",
+  };
+}
+
+
 function safeReadArrayStorage(key: string) {
   try {
     const raw = localStorage.getItem(key);
@@ -536,8 +745,15 @@ function getResultSummary(leads: Lead[]) {
   };
 }
 
-function buildApproachText(lead: Lead) {
-  return `Olá, tudo bem? Vi a ${lead.name} e percebi que vocês têm um ótimo potencial para captar mais clientes pelo WhatsApp e agenda online. A NXA ajuda empresas como a sua a responder leads automaticamente, organizar contatos e transformar conversas em vendas. Posso te mostrar uma ideia rápida aplicada ao seu negócio?`;
+function buildApproachText(lead: Lead, offer?: SalesOffer) {
+  if (lead.ai_pitch) return lead.ai_pitch;
+
+  const offerName = offer?.name || "Automação WhatsApp com IA";
+  const offerDescription =
+    offer?.description ||
+    "responder leads automaticamente, organizar contatos e transformar conversas em vendas";
+
+  return `Olá, tudo bem? Vi a ${lead.name} e percebi que vocês têm potencial para melhorar aquisição e atendimento. Trabalho com ${offerName}, uma solução para ${offerDescription}. Posso te mostrar uma ideia rápida aplicada ao seu negócio?`;
 }
 
 function normalizeExternalUrl(url?: string) {
@@ -619,7 +835,11 @@ function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
     "Site",
     "Avaliacao",
     "Avaliacoes",
-    "Score",
+    "Score IA",
+    "Probabilidade",
+    "Ticket estimado",
+    "Motivo IA",
+    "Proxima acao",
     "Status",
   ];
 
@@ -633,7 +853,11 @@ function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
     lead.website || "",
     lead.google_rating || "",
     lead.google_reviews_count || "",
-    lead.score || "",
+    lead.ai_fit_score || lead.score || "",
+    lead.ai_purchase_probability || "",
+    lead.ai_ticket_estimate || "",
+    lead.ai_reason || "",
+    lead.ai_next_action || "",
     lead.status || "",
   ]);
 
@@ -684,6 +908,9 @@ export function Busca() {
   const [savedLeadIds, setSavedLeadIds] = React.useState<string[]>([]);
   const [crmLeadIds, setCrmLeadIds] = React.useState<string[]>([]);
   const [approachLeadIds, setApproachLeadIds] = React.useState<string[]>([]);
+  const [offer, setOffer] = React.useState<SalesOffer>(() => readSalesOfferStorage());
+  const [showOfferAdvanced, setShowOfferAdvanced] = React.useState(false);
+  const [aiScoringEnabled, setAiScoringEnabled] = React.useState(true);
 
   const category = React.useMemo(() => {
     return (
@@ -711,6 +938,14 @@ export function Busca() {
     setCrmLeadIds(readStringArrayStorage("nxa_crm_lead_ids"));
     setApproachLeadIds(readStringArrayStorage("nxa_approach_lead_ids"));
   }, []);
+
+  React.useEffect(() => {
+    writeSalesOfferStorage(offer);
+  }, [offer]);
+
+  function updateOffer<K extends keyof SalesOffer>(key: K, value: SalesOffer[K]) {
+    setOffer((current) => ({ ...current, [key]: value }));
+  }
 
   async function loadCredits() {
     setCreditsLoading(true);
@@ -793,14 +1028,26 @@ export function Busca() {
   }
 
   async function loadSearchHistory() {
-    const localHistory = safeReadArrayStorage("nxa_search_history");
-
     setLoadingHistory(true);
 
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setSearches([]);
+        return;
+      }
+
+      const localHistory = safeReadArrayStorage("nxa_search_history").filter(
+        (item: any) => !item.user_id || item.user_id === user.id
+      );
+
       const { data, error } = await supabase
         .from("search_history")
         .select("*")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(20);
 
@@ -809,7 +1056,7 @@ export function Busca() {
       setSearches(data?.length ? data : localHistory);
     } catch (error) {
       console.error("Erro ao carregar histórico:", error);
-      setSearches(localHistory);
+      setSearches([]);
     } finally {
       setLoadingHistory(false);
     }
@@ -821,11 +1068,15 @@ export function Busca() {
     status: "completed" | "failed";
     errorMessage?: string;
   }) {
+    const { data: currentAuthData } = await supabase.auth.getUser();
+    const currentUserId = currentAuthData?.user?.id || null;
+
     const localRecord = {
       id:
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : String(Date.now()),
+      user_id: currentUserId,
       niche: params.body.niche,
       query: params.body.queries?.join(", ") || "",
       city: params.body.city,
@@ -851,10 +1102,8 @@ export function Busca() {
     saveSearchHistoryLocal(localRecord);
 
     try {
-      const { data: authData } = await supabase.auth.getUser();
-
       const payload = {
-        user_id: authData?.user?.id || null,
+        user_id: currentUserId,
         business_id: import.meta.env.VITE_BUSINESS_ID || null,
         tenant_id: import.meta.env.VITE_TENANT_ID || null,
         query: localRecord.query,
@@ -997,10 +1246,18 @@ export function Busca() {
       quantity,
       precision: precisionMode,
       only_opportunity: onlyOpportunity,
+      sales_offer: offer,
+      ai_scoring: aiScoringEnabled,
     };
 
     try {
-      const leads = await searchLeads(body);
+      const rawLeads = await searchLeads(body);
+      const leads = aiScoringEnabled
+        ? rawLeads
+            .map((lead) => analyzeLeadForOffer(lead, offer))
+            .sort((a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0))
+        : rawLeads;
+
       const creditsUsed = leads.length * CREDIT_COST_PER_LEAD;
 
       await consumeCredits(creditsUsed, {
@@ -1010,6 +1267,8 @@ export function Busca() {
         queries: built.queries,
         quantity,
         results_count: leads.length,
+        sales_offer: offer,
+        ai_scoring: aiScoringEnabled,
       });
 
       setResults(leads);
@@ -1137,9 +1396,17 @@ export function Busca() {
         website: lead.website || null,
         google_rating: lead.google_rating || null,
         google_reviews_count: lead.google_reviews_count || null,
-        score: lead.score || 0,
+        score: lead.ai_fit_score || lead.score || 0,
+        ai_score: lead.ai_fit_score || lead.score || 0,
+        ai_fit_score: lead.ai_fit_score || lead.score || 0,
+        ai_purchase_probability: lead.ai_purchase_probability || null,
+        ai_ticket_estimate: lead.ai_ticket_estimate || null,
+        ai_reason: lead.ai_reason || null,
+        ai_next_action: lead.ai_next_action || null,
+        ai_pitch: lead.ai_pitch || null,
+        offer_name: offer.name || null,
         status: "saved",
-        source: "busca_inteligente",
+        source: "busca_inteligente_ia",
         payload: lead,
       };
 
@@ -1187,12 +1454,10 @@ export function Busca() {
         city: lead.city,
         state: lead.state,
         stage: "novo",
-        score: lead.score || 0,
+        score: lead.ai_fit_score || lead.score || 0,
         value: 0,
-        source: "busca_inteligente",
-        notes: `Lead enviado pela Busca Inteligente. Motivo: ${getOpportunityReason(
-          lead
-        )}.`,
+        source: "busca_inteligente_ia",
+        notes: `Lead enviado pela Busca Inteligente IA. Oferta: ${offer.name}. Score: ${lead.ai_fit_score || lead.score}/100. Probabilidade: ${lead.ai_purchase_probability || "—"}%. Motivo: ${lead.ai_reason || getOpportunityReason(lead)}. Próxima ação: ${lead.ai_next_action || "Qualificar lead."}`,
         payload: lead,
       };
 
@@ -1216,7 +1481,7 @@ export function Busca() {
   };
 
   const handleGenerateApproach = async (lead: Lead) => {
-    const text = buildApproachText(lead);
+    const text = buildApproachText(lead, offer);
     markApproachGenerated(lead);
 
     try {
@@ -1330,6 +1595,132 @@ export function Busca() {
           </span>
         </div>
       </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="rounded-2xl border border-primary/20 bg-card/70 p-6 shadow-sm"
+      >
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Wand2 className="h-4 w-4 text-primary" />
+              AI Sales Intelligence
+            </div>
+            <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+              Defina exatamente o que você vende. A IA compara sua oferta com cada empresa encontrada, gera score de aderência, probabilidade de compra, ticket estimado e abordagem personalizada.
+            </p>
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              checked={aiScoringEnabled}
+              onChange={(event) => setAiScoringEnabled(event.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            Análise IA ativa
+          </label>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-3">
+          <Field label="Nome da oferta">
+            <input
+              value={offer.name}
+              onChange={(event) => updateOffer("name", event.target.value)}
+              placeholder="Ex: Automação WhatsApp com IA"
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+            />
+          </Field>
+
+          <Field label="Preço / ticket">
+            <input
+              value={offer.price}
+              onChange={(event) => updateOffer("price", event.target.value)}
+              placeholder="Ex: R$497/mês"
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+            />
+          </Field>
+
+          <Field label="Cliente ideal">
+            <input
+              value={offer.idealCustomer}
+              onChange={(event) => updateOffer("idealCustomer", event.target.value)}
+              placeholder="Ex: clínicas, estética, odontologia..."
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-3">
+          <Field label="Descrição curta do produto">
+            <textarea
+              value={offer.description}
+              onChange={(event) => updateOffer("description", event.target.value)}
+              rows={3}
+              placeholder="Explique o que você vende, para quem e qual resultado promete."
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </Field>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowOfferAdvanced((current) => !current)}
+          className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline"
+        >
+          {showOfferAdvanced ? "Ocultar critérios avançados" : "Mostrar critérios avançados da IA"}
+          <ArrowUpRight className="h-3 w-3" />
+        </button>
+
+        <AnimatePresence>
+          {showOfferAdvanced && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                <Field label="Dores que resolve">
+                  <textarea
+                    value={offer.painPoints}
+                    onChange={(event) => updateOffer("painPoints", event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                </Field>
+
+                <Field label="Diferenciais">
+                  <textarea
+                    value={offer.differentials}
+                    onChange={(event) => updateOffer("differentials", event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                </Field>
+
+                <Field label="Objeções comuns">
+                  <textarea
+                    value={offer.objections}
+                    onChange={(event) => updateOffer("objections", event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                </Field>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="mt-4 grid gap-2 md:grid-cols-4">
+          <MiniMetric label="Motor" value={aiScoringEnabled ? "IA ativa" : "Manual"} icon={BrainCircuit} />
+          <MiniMetric label="Oferta" value={offer.name || "Não definida"} icon={Target} />
+          <MiniMetric label="Ticket" value={offer.price || "—"} icon={DollarSign} />
+          <MiniMetric label="ICP" value={offer.idealCustomer ? "Configurado" : "Pendente"} icon={Users} />
+        </div>
+      </motion.div>
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -1614,7 +2005,7 @@ export function Busca() {
               Resultados da busca
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Análise comercial, qualidade dos dados e ações rápidas para cada lead.
+              Leads priorizados por aderência à sua oferta, probabilidade de compra, ticket estimado e próxima melhor ação.
             </p>
           </div>
 
@@ -2035,15 +2426,27 @@ function LeadCard({
           </div>
         </div>
 
-        <div className="mb-3 rounded-lg border border-border bg-muted/20 p-3">
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <BrainCircuit className="h-3.5 w-3.5 text-primary" />
-            Potencial {lead.score || 0}/100
+        <div className="mb-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+          <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+            <span className="flex items-center gap-2">
+              <BrainCircuit className="h-3.5 w-3.5 text-primary" />
+              Fit IA {lead.ai_fit_score || lead.score || 0}/100
+            </span>
+            <span className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-primary">
+              {lead.ai_fit_label || getScoreLabel(lead.score || 0)}
+            </span>
           </div>
 
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Motivo: {opportunityReason}.
+            {lead.ai_reason || `Motivo: ${opportunityReason}.`}
           </p>
+
+          {lead.ai_next_action && (
+            <div className="mt-2 flex items-start gap-1.5 rounded-md border border-border bg-background/50 p-2 text-[11px] text-muted-foreground">
+              <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+              <span>{lead.ai_next_action}</span>
+            </div>
+          )}
         </div>
 
         <div className="space-y-1.5">
@@ -2064,21 +2467,21 @@ function LeadCard({
 
         <div className="mt-4 grid grid-cols-3 gap-2">
           <MiniMetric
-            label="Avaliação"
-            value={lead.google_rating ? lead.google_rating.toFixed(1) : "—"}
-            icon={Star}
+            label="Chance"
+            value={`${lead.ai_purchase_probability || Math.round((lead.score || 0) * 0.8)}%`}
+            icon={Gauge}
+          />
+
+          <MiniMetric
+            label="Ticket"
+            value={lead.ai_ticket_estimate || "—"}
+            icon={DollarSign}
           />
 
           <MiniMetric
             label="Reviews"
             value={lead.google_reviews_count || 0}
             icon={MessageSquareText}
-          />
-
-          <MiniMetric
-            label="Dados"
-            value={`${hasPhone ? 1 : 0}${hasWebsite ? 1 : 0}/2`}
-            icon={ShieldCheck}
           />
         </div>
 
