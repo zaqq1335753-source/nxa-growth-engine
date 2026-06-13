@@ -521,6 +521,20 @@ function ObjectionCard({ title, answer }: { title: string; answer: string }) {
   );
 }
 
+function isValidUuid(value?: string | null) {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function escapeSupabaseOrValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/\)/g, "\\)");
+}
+
+function getRouteLeadCandidates(value?: string | null) {
+  if (!value) return [];
+  const decoded = decodeURIComponent(value);
+  return Array.from(new Set([value, decoded].filter(Boolean)));
+}
+
 export function LeadProfile() {
   const [, params] = useRoute("/leads/:id");
   const id = params?.id;
@@ -545,29 +559,23 @@ export function LeadProfile() {
     return data.session?.user?.id || null;
   }
 
-  async function loadOffer(uid: string) {
-    try {
-      const { data, error } = await supabase
-        .from("sales_offers")
-        .select("*")
-        .eq("user_id", uid)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+  async function loadOffer(_uid: string) {
+    // Mantido sem consulta ao Supabase porque a tabela sales_offers ainda não existe no banco atual.
+    // Isso evita 404 no console e mantém o perfil funcionando normalmente.
+    const localOffer = localStorage.getItem("nxa_active_sales_offer");
 
-      if (error) {
-        console.warn("sales_offers ainda não configurada:", error.message);
-        setOffer(null);
-        return null;
+    if (localOffer) {
+      try {
+        const parsed = JSON.parse(localOffer) as SalesOffer;
+        setOffer(parsed);
+        return parsed;
+      } catch {
+        localStorage.removeItem("nxa_active_sales_offer");
       }
-
-      setOffer(data as SalesOffer | null);
-      return data as SalesOffer | null;
-    } catch (error) {
-      console.warn("Não foi possível carregar oferta:", error);
-      setOffer(null);
-      return null;
     }
+
+    setOffer(null);
+    return null;
   }
 
   async function loadIntelligence(leadId: string, uid: string) {
@@ -608,17 +616,48 @@ export function LeadProfile() {
         return;
       }
 
-      let query = supabase.from("leads").select("*").eq("id", id);
-      query = query.eq("user_id", uid);
+      const candidates = getRouteLeadCandidates(id);
+      let data: any = null;
+      let error: any = null;
 
-      const { data, error } = await query.maybeSingle();
+      if (isValidUuid(id)) {
+        const response = await supabase
+          .from("leads")
+          .select("*")
+          .eq("id", id)
+          .or(`user_id.eq.${uid},user_id.is.null`)
+          .maybeSingle();
+        data = response.data;
+        error = response.error;
+      } else {
+        const response = await supabase
+          .from("leads")
+          .select("*")
+          .or(`user_id.eq.${uid},user_id.is.null`)
+          .eq("business_id", candidates[0])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        data = response.data;
+        error = response.error;
+      }
+
       if (error) throw error;
+
+      if (data?.id && !data.user_id) {
+        await supabase.from("leads").update({ user_id: uid, updated_at: new Date().toISOString() }).eq("id", data.id);
+        data = { ...data, user_id: uid };
+      }
 
       setLead(data);
       setStatus(data?.status || "new");
       setNotes(data?.notes || "");
 
-      await Promise.all([loadIntelligence(id, uid), loadOffer(uid)]);
+      if (data?.id) {
+        await Promise.all([loadIntelligence(data.id, uid), loadOffer(uid)]);
+      } else {
+        await loadOffer(uid);
+      }
     } catch (error: any) {
       console.error("Erro ao buscar lead:", error);
       toast({ title: "Erro ao carregar lead.", description: error?.message || "Não foi possível buscar este lead.", variant: "destructive" });
@@ -632,14 +671,14 @@ export function LeadProfile() {
   }, [id]);
 
   async function saveLead() {
-    if (!id || !userId) return;
+    if (!lead?.id || !userId) return;
     setSaving(true);
 
     try {
       const { error } = await supabase
         .from("leads")
         .update({ status, notes, updated_at: new Date().toISOString() })
-        .eq("id", id)
+        .eq("id", lead.id)
         .eq("user_id", userId);
 
       if (error) throw error;
@@ -653,7 +692,7 @@ export function LeadProfile() {
   }
 
   async function analyzeLead() {
-    if (!id || !lead || !userId) return;
+    if (!lead?.id || !lead || !userId) return;
     setAnalyzing(true);
 
     try {
@@ -661,7 +700,7 @@ export function LeadProfile() {
       const { data, error } = await supabase.functions.invoke("analyze-lead", {
         body: {
           user_id: userId,
-          lead_id: id,
+          lead_id: lead.id,
           lead_name: getLeadName(lead),
           lead_phone: getLeadPhone(lead),
           lead_website: getLeadWebsite(lead),
@@ -701,7 +740,7 @@ export function LeadProfile() {
       if (data?.intelligence) {
         setIntelligence(data.intelligence);
       } else {
-        await loadIntelligence(id, userId);
+        await loadIntelligence(lead.id, userId);
       }
 
       toast({ title: "Análise concluída.", description: "A IA analisou o lead com base na sua oferta." });

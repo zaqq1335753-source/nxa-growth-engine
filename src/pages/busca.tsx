@@ -36,6 +36,9 @@ import {
   Users,
   Lightbulb,
   Gauge,
+  ChevronDown,
+  ChevronUp,
+  Layers3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -315,6 +318,32 @@ const NICHE_CATALOG: Category[] = [
         ],
         includedTypes: ["lawyer"],
       },
+    ],
+  },
+  {
+    key: "alimentacao",
+    label: "Alimentação",
+    emoji: "🍽️",
+    niches: [
+      { key: "restaurante", label: "Restaurantes", emoji: "🍝", keywords: ["restaurante", "restaurante delivery", "pizzaria", "hamburgueria", "self service", "bar e restaurante"], includedTypes: ["restaurant", "meal_takeaway"] },
+      { key: "cafeteria", label: "Cafeterias", emoji: "☕", keywords: ["cafeteria", "coffee shop", "padaria artesanal", "doceria", "confeitaria", "brunch"], includedTypes: ["cafe", "bakery"] },
+    ],
+  },
+  {
+    key: "educacao",
+    label: "Educação",
+    emoji: "🎓",
+    niches: [
+      { key: "escola", label: "Escolas e cursos", emoji: "📚", keywords: ["escola particular", "curso profissionalizante", "curso de inglês", "escola de idiomas", "reforço escolar", "curso técnico"], includedTypes: ["school", "university"] },
+    ],
+  },
+  {
+    key: "casa_construcao",
+    label: "Casa & Construção",
+    emoji: "🏗️",
+    niches: [
+      { key: "construcao", label: "Construção e reformas", emoji: "🧱", keywords: ["construtora", "empreiteira", "reformas", "marcenaria", "marmoraria", "vidraçaria", "material de construção"], includedTypes: ["hardware_store", "home_goods_store", "general_contractor"] },
+      { key: "ar_condicionado", label: "Ar-condicionado", emoji: "❄️", keywords: ["instalação de ar condicionado", "manutenção ar condicionado", "climatização", "refrigeração", "assistência ar condicionado"], includedTypes: ["point_of_interest", "establishment"] },
     ],
   },
 ];
@@ -1019,6 +1048,12 @@ export function Busca() {
   const [offer, setOffer] = React.useState<SalesOffer>(() => readSalesOfferStorage());
   const [showOfferAdvanced, setShowOfferAdvanced] = React.useState(false);
   const [aiScoringEnabled, setAiScoringEnabled] = React.useState(true);
+  const [engineStage, setEngineStage] = React.useState(0);
+  const [showSearchSetup, setShowSearchSetup] = React.useState(true);
+  const [showResultsDetails, setShowResultsDetails] = React.useState(true);
+  const [showHistoryPanel, setShowHistoryPanel] = React.useState(false);
+  const [visibleResultsCount, setVisibleResultsCount] = React.useState(6);
+  const [visibleHistoryCount, setVisibleHistoryCount] = React.useState(6);
 
   const category = React.useMemo(() => {
     return (
@@ -1050,6 +1085,19 @@ export function Busca() {
   React.useEffect(() => {
     writeSalesOfferStorage(offer);
   }, [offer]);
+
+  React.useEffect(() => {
+    if (!running) {
+      setEngineStage(0);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setEngineStage((current) => (current + 1) % 5);
+    }, 1200);
+
+    return () => window.clearInterval(interval);
+  }, [running]);
 
   function updateOffer<K extends keyof SalesOffer>(key: K, value: SalesOffer[K]) {
     setOffer((current) => ({ ...current, [key]: value }));
@@ -1342,6 +1390,8 @@ export function Busca() {
       return;
     }
 
+    setResults([]);
+    setEngineStage(0);
     setRunning(true);
 
     const body = {
@@ -1420,6 +1470,37 @@ export function Busca() {
     () => getResultSummary(results),
     [results]
   );
+
+  const bestLead = React.useMemo(() => {
+    return [...results].sort(
+      (a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0)
+    )[0];
+  }, [results]);
+
+  const commandMetrics = React.useMemo(() => {
+    const avgScore = resultSummary.avgScore || 0;
+    const hot = resultSummary.hot || 0;
+    const contactable = resultSummary.withPhone || 0;
+    const marketSignal = avgScore >= 75 ? "Mercado aquecido" : avgScore >= 60 ? "Mercado promissor" : "Mercado em análise";
+    const estimatedPipeline = results.reduce((sum, lead) => {
+      const score = lead.ai_fit_score || lead.score || 0;
+      const reviews = Number(lead.google_reviews_count || 0);
+      return sum + Math.max(350, Math.round((score * 12) + Math.min(reviews, 600) * 1.4));
+    }, 0);
+
+    return { hot, contactable, marketSignal, estimatedPipeline };
+  }, [results, resultSummary]);
+
+  const visibleResults = React.useMemo(() => results.slice(0, visibleResultsCount), [results, visibleResultsCount]);
+  const visibleSearches = React.useMemo(() => searches.slice(0, visibleHistoryCount), [searches, visibleHistoryCount]);
+
+  const engineSteps = [
+    "Interpretando intenção comercial",
+    "Consultando base histórica",
+    "Deduplicando oportunidades",
+    "Enriquecendo sinais públicos",
+    "Priorizando abordagem de venda",
+  ];
 
   const handleExportCsv = () => {
     if (!results.length) {
@@ -1505,14 +1586,6 @@ export function Busca() {
         google_rating: lead.google_rating || null,
         google_reviews_count: lead.google_reviews_count || null,
         score: lead.ai_fit_score || lead.score || 0,
-        ai_score: lead.ai_fit_score || lead.score || 0,
-        ai_fit_score: lead.ai_fit_score || lead.score || 0,
-        ai_purchase_probability: lead.ai_purchase_probability || null,
-        ai_ticket_estimate: lead.ai_ticket_estimate || null,
-        ai_reason: lead.ai_reason || null,
-        ai_next_action: lead.ai_next_action || null,
-        ai_pitch: lead.ai_pitch || null,
-        offer_name: offer.name || null,
         status: "saved",
         source: "busca_inteligente_ia",
         payload: lead,
@@ -1642,765 +1715,705 @@ export function Busca() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const handleRepeatSearch = (search: any) => {
-    if (search.city) setCity(search.city);
-    if (search.state) setState(search.state);
-    if (search.radius_km) setRadius(Number(search.radius_km));
-    if (search.quantity) setQuantity(Number(search.quantity));
-
-    const leads = Array.isArray(search.results)
+  async function resolveHistoryLeads(search: any): Promise<Lead[]> {
+    const embeddedLeads = Array.isArray(search.results)
       ? search.results
       : Array.isArray(search.leads)
         ? search.leads
         : [];
 
-    if (leads.length) {
-      setResults(leads);
-      saveLastSearchForRadar({
-        ...search,
-        results: leads,
-        leads,
-      });
+    if (embeddedLeads.length > 0) {
+      return embeddedLeads;
     }
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user || !search.city || !search.state) return [];
+
+    const searchNiche = String(search.niche || search.query || "").trim();
+    const limit = Number(search.results_count || search.quantity || 40);
+
+    let query = supabase
+      .from("leads")
+      .select("*")
+      .eq("city", search.city)
+      .eq("state", search.state)
+      .or(`user_id.eq.${user.id},user_id.is.null`)
+      .order("created_at", { ascending: false })
+      .limit(Math.max(1, Math.min(limit, 100)));
+
+    if (searchNiche) {
+      query = query.ilike("segment", `%${searchNiche.split(",")[0].trim()}%`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.warn("Não foi possível recuperar leads do histórico no banco:", error);
+      return [];
+    }
+
+    return (data || []) as Lead[];
+  }
+
+  function applyHistoryParameters(search: any) {
+    if (search.city) setCity(search.city);
+    if (search.state) setState(search.state);
+    if (search.radius_km) setRadius(Number(search.radius_km));
+    if (search.quantity) setQuantity(Number(search.quantity));
+
+    const payloadQueries = Array.isArray(search.payload?.queries) ? search.payload.queries : [];
+    if (payloadQueries.length) {
+      setMode("custom");
+      setCustomQueries(payloadQueries);
+      setSelectedKeywords([]);
+    }
+  }
+
+  const handleOpenHistory = async (search: any) => {
+    applyHistoryParameters(search);
+    const leads = await resolveHistoryLeads(search);
+
+    if (!leads.length) {
+      toast({
+        title: "Histórico sem leads salvos",
+        description: "Os parâmetros foram recuperados. Clique em Iniciar para reconstruir essa varredura.",
+      });
+      return;
+    }
+
+    const ranked = [...leads].sort(
+      (a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0)
+    );
+
+    setResults(ranked);
+    saveLastSearchForRadar({
+      ...search,
+      results: ranked,
+      leads: ranked,
+      results_count: ranked.length,
+    });
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
     toast({
-      title: "Busca recuperada",
-      description: "Resultados carregados para análise.",
+      title: "Varredura reaberta",
+      description: `${ranked.length} oportunidade(s) carregada(s) no Opportunity Engine.`,
     });
   };
 
+  const handleSendHistoryToRadar = async (search: any) => {
+    const leads = await resolveHistoryLeads(search);
+
+    if (!leads.length) {
+      toast({
+        title: "Nada para enviar ao Radar",
+        description: "Essa busca não possui resultados salvos. Execute novamente para gerar leads.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    saveLastSearchForRadar({
+      ...search,
+      results: leads,
+      leads,
+      results_count: leads.length,
+    });
+
+    toast({
+      title: "Radar atualizado",
+      description: `${leads.length} lead(s) enviados para análise territorial.`,
+    });
+
+    setTimeout(() => {
+      window.location.href = "/radar";
+    }, 350);
+  };
+
+  const handleRecoverHistoryParameters = (search: any, autoRun = false) => {
+    applyHistoryParameters(search);
+
+    toast({
+      title: autoRun ? "Reexecutando missão" : "Missão recuperada",
+      description: autoRun
+        ? "Os filtros foram restaurados e a busca será iniciada novamente."
+        : "Filtros restaurados. Revise os dados e clique em Iniciar.",
+    });
+
+    if (autoRun) {
+      setTimeout(() => start(), 250);
+    }
+  };
+
   return (
-    <div className="space-y-6 p-6 lg:p-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            Discovery Engine
-          </div>
-
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Busca inteligente multi-nicho
-          </h1>
-
-          <p className="mt-1 text-sm text-muted-foreground">
-            Expansão semântica, deduplicação e ranking por compatibilidade real entre oferta, nicho e sinais comerciais.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-3 py-2 text-xs">
-          <Sparkles className="h-3.5 w-3.5 text-primary" />
-          <span className="text-muted-foreground">Estimado:</span>
-          <span className="font-semibold">~{estimated} leads</span>
-          <span className="text-muted-foreground">·</span>
-          <span className="font-semibold">{totalQueries || 1} consulta(s)</span>
-          <span className="text-muted-foreground">·</span>
-          <Coins className="h-3 w-3 text-primary" />
-          <span className="font-semibold tabular-nums">{cost} cr</span>
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">Saldo:</span>
-          <span className="font-semibold tabular-nums">
-            {creditsLoading ? "..." : `${credits} cr`}
-          </span>
-        </div>
+    <div className="relative overflow-hidden p-4 lg:p-8">
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute left-[-12rem] top-[-12rem] h-96 w-96 rounded-full bg-primary/15 blur-3xl" />
+        <div className="absolute right-[-10rem] top-24 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-orange-500/10 blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="rounded-2xl border border-primary/20 bg-card/70 p-6 shadow-sm"
-      >
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Wand2 className="h-4 w-4 text-primary" />
-              AI Sales Intelligence
-            </div>
-            <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-              Defina exatamente o que você vende. O motor cruza oferta, ICP, dores, segmento do lead, reputação, presença digital e contato para ranquear quem realmente tem chance de comprar.
-            </p>
-          </div>
-
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
-            <input
-              type="checkbox"
-              checked={aiScoringEnabled}
-              onChange={(event) => setAiScoringEnabled(event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-            Análise IA ativa
-          </label>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Field label="Nome da oferta">
-            <input
-              value={offer.name}
-              onChange={(event) => updateOffer("name", event.target.value)}
-              placeholder="Ex: Automação WhatsApp com IA"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-
-          <Field label="Preço / ticket">
-            <input
-              value={offer.price}
-              onChange={(event) => updateOffer("price", event.target.value)}
-              placeholder="Ex: R$497/mês"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-
-          <Field label="Cliente ideal">
-            <input
-              value={offer.idealCustomer}
-              onChange={(event) => updateOffer("idealCustomer", event.target.value)}
-              placeholder="Ex: clínicas, estética, odontologia..."
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-        </div>
-
-        <div className="mt-3">
-          <Field label="Descrição curta do produto">
-            <textarea
-              value={offer.description}
-              onChange={(event) => updateOffer("description", event.target.value)}
-              rows={3}
-              placeholder="Explique o que você vende, para quem e qual resultado promete."
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setShowOfferAdvanced((current) => !current)}
-          className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline"
+      <div className="mx-auto max-w-[1600px] space-y-6">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="relative overflow-hidden rounded-[2rem] border border-primary/25 bg-gradient-to-br from-card/95 via-background/90 to-primary/5 p-6 shadow-2xl shadow-primary/5 lg:p-8"
         >
-          {showOfferAdvanced ? "Ocultar critérios avançados" : "Mostrar critérios avançados da IA"}
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
-
-        <AnimatePresence>
-          {showOfferAdvanced && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                <Field label="Dores que resolve">
-                  <textarea
-                    value={offer.painPoints}
-                    onChange={(event) => updateOffer("painPoints", event.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                  />
-                </Field>
-
-                <Field label="Diferenciais">
-                  <textarea
-                    value={offer.differentials}
-                    onChange={(event) => updateOffer("differentials", event.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                  />
-                </Field>
-
-                <Field label="Objeções comuns">
-                  <textarea
-                    value={offer.objections}
-                    onChange={(event) => updateOffer("objections", event.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                  />
-                </Field>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="mt-4 grid gap-2 md:grid-cols-4">
-          <MiniMetric label="Motor" value={aiScoringEnabled ? "IA ativa" : "Manual"} icon={BrainCircuit} />
-          <MiniMetric label="Oferta" value={offer.name || "Não definida"} icon={Target} />
-          <MiniMetric label="Ticket" value={offer.price || "—"} icon={DollarSign} />
-          <MiniMetric label="ICP" value={offer.idealCustomer ? "Configurado" : "Pendente"} icon={Users} />
-        </div>
-
-        <div className="mt-4 rounded-xl border border-border/70 bg-background/45 p-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Como o score é calculado
-          </div>
-          <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground md:grid-cols-4">
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <b className="text-foreground">Compatibilidade</b>
-              <p className="mt-1">Oferta, ICP e segmento do lead precisam conversar entre si.</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <b className="text-foreground">Necessidade</b>
-              <p className="mt-1">A IA procura sinais de dor provável e uso real da solução.</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <b className="text-foreground">Potencial financeiro</b>
-              <p className="mt-1">Reputação, reviews, site e porte aparente aumentam o peso.</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <b className="text-foreground">Resposta</b>
-              <p className="mt-1">Telefone, presença digital e abordagem prática elevam a chance.</p>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="rounded-2xl border border-border bg-card/60 p-6 shadow-sm"
-      >
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex rounded-xl border border-border bg-muted/30 p-1">
-            <button
-              onClick={() => setMode("catalogo")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all",
-                mode === "catalogo"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Target className="h-3.5 w-3.5" />
-              Catálogo de nichos
-            </button>
-
-            <button
-              onClick={() => setMode("custom")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all",
-                mode === "custom"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Zap className="h-3.5 w-3.5" />
-              Termos personalizados
-            </button>
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/80 to-transparent" />
+          <div className="absolute right-6 top-6 hidden rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.28em] text-primary lg:block">
+            NXA Opportunity Engine
           </div>
 
-          <div className="flex items-center gap-4 text-xs">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={precisionMode}
-                onChange={(event) => setPrecisionMode(event.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="flex items-center gap-1">
-                <Filter className="h-3 w-3" />
-                Modo precisão
-              </span>
-            </label>
-
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={onlyOpportunity}
-                onChange={(event) => setOnlyOpportunity(event.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="flex items-center gap-1">
-                <Globe2 className="h-3 w-3" />
-                Só sem website
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {mode === "catalogo" ? (
-          <div className="space-y-5">
-            <div className="flex flex-wrap gap-2">
-              {NICHE_CATALOG.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => {
-                    setCategoryKey(item.key);
-                    setNicheKey(item.niches[0].key);
-                  }}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
-                    categoryKey === item.key
-                      ? "border-primary/60 bg-primary/10 text-foreground"
-                      : "border-border bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                  )}
-                >
-                  <span className="mr-1">{item.emoji}</span>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              {category.niches.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => setNicheKey(item.key)}
-                  className={cn(
-                    "group flex items-center gap-2 rounded-lg border p-3 text-left text-sm transition-all",
-                    nicheKey === item.key
-                      ? "border-primary/70 bg-primary/10"
-                      : "border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/40"
-                  )}
-                >
-                  <span className="text-lg">{item.emoji}</span>
-                  <span className="truncate">{item.label}</span>
-                </button>
-              ))}
-            </div>
-
+          <div className="grid gap-8 xl:grid-cols-[1.05fr_0.95fr] xl:items-end">
             <div>
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Termos de busca · selecione para combinar
-                </label>
-
-                <span className="text-xs text-muted-foreground">
-                  {selectedKeywords.length} selecionado(s)
-                </span>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                Command Center de Prospecção
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {niche.keywords.map((keyword) => {
-                  const active = selectedKeywords.includes(keyword);
+              <h1 className="max-w-4xl text-4xl font-black tracking-[-0.05em] text-foreground md:text-6xl">
+                Encontre quem tem mais chance de comprar hoje.
+              </h1>
 
-                  return (
-                    <button
-                      key={keyword}
-                      onClick={() => toggleKeyword(keyword)}
-                      className={cn(
-                        "rounded-md border px-2.5 py-1.5 text-xs transition-all",
-                        active
-                          ? "border-primary/60 bg-primary/15 text-foreground"
-                          : "border-border bg-muted/20 text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {active && <span className="mr-1 text-primary">✓</span>}
-                      {keyword}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {niche.includedTypes.length > 0 && precisionMode && (
-                <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Filter className="h-3 w-3" />
-                  Filtro ativo:
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-foreground">
-                    {niche.includedTypes.join(", ")}
-                  </code>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Termos personalizados
-              </label>
-
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={customInput}
-                  onChange={(event) => setCustomInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addCustom();
-                    }
-                  }}
-                  placeholder="ex: estúdio de tatuagem premium"
-                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-                />
-
-                <Button variant="secondary" onClick={addCustom}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Adicione múltiplas variações. Cada termo executa uma consulta
-                independente.
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground md:text-base">
+                A busca deixa de ser uma lista comum e vira um motor comercial: consulta a base, evita repetição, cruza oferta com sinais públicos, ranqueia o fit e entrega as próximas oportunidades para abordagem.
               </p>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MiniMetric label="Saldo" value={creditsLoading ? "..." : `${credits} cr`} icon={Coins} />
+                <MiniMetric label="Consulta" value={`${totalQueries || 1} termo(s)`} icon={Search} />
+                <MiniMetric label="Estimativa" value={`~${estimated} leads`} icon={Radar} />
+                <MiniMetric label="Custo máximo" value={`${cost} cr`} icon={ShieldCheck} />
+              </div>
             </div>
+
+            <div className="rounded-3xl border border-border/70 bg-background/60 p-4 backdrop-blur-xl">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                    Painel vivo da busca
+                  </div>
+                  <div className="mt-1 text-sm font-semibold">
+                    {running ? engineSteps[engineStage] : results.length ? commandMetrics.marketSignal : "Pronto para iniciar"}
+                  </div>
+                </div>
+                <div className={cn("h-3 w-3 rounded-full", running ? "animate-pulse bg-primary" : results.length ? "bg-emerald-400" : "bg-muted")} />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-border bg-card/60 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Oportunidades</div>
+                  <div className="mt-2 text-3xl font-black text-primary">{results.length || "—"}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">resultado atual</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card/60 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Quentes</div>
+                  <div className="mt-2 text-3xl font-black text-orange-400">{commandMetrics.hot || "—"}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">prioridade alta</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card/60 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Pipeline</div>
+                  <div className="mt-2 text-2xl font-black text-emerald-400">
+                    {commandMetrics.estimatedPipeline ? `R$ ${commandMetrics.estimatedPipeline.toLocaleString("pt-BR")}` : "—"}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">potencial bruto</div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {engineSteps.map((step, index) => (
+                  <div key={step} className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                    <div className={cn("flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-bold", running && engineStage === index ? "border-primary bg-primary text-primary-foreground" : !running && results.length ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-border text-muted-foreground")}>
+                      {!running && results.length ? <Check className="h-3 w-3" /> : index + 1}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        <CollapsibleShell
+          title="Configuração da busca"
+          eyebrow="Search cockpit"
+          description="Oferta, nicho, região e limites ficam recolhíveis para deixar a experiência menos poluída após configurar."
+          open={showSearchSetup}
+          onToggle={() => setShowSearchSetup((current) => !current)}
+          rightSlot={<span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-black text-primary">{mode === "catalogo" ? "Catálogo IA" : "Busca livre"}</span>}
+        >
+        <div className="grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="rounded-[1.75rem] border border-border bg-card/70 p-5 shadow-xl shadow-black/5 backdrop-blur"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold">
+                  <Wand2 className="h-4 w-4 text-primary" />
+                  Oferta que a IA deve vender
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Quanto melhor essa oferta, mais precisa fica a priorização.
+                </p>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={aiScoringEnabled}
+                  onChange={(event) => setAiScoringEnabled(event.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                IA ativa
+              </label>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Nome da oferta">
+                <input value={offer.name} onChange={(event) => updateOffer("name", event.target.value)} placeholder="Automação WhatsApp com IA" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
+              </Field>
+              <Field label="Preço / ticket">
+                <input value={offer.price} onChange={(event) => updateOffer("price", event.target.value)} placeholder="R$497/mês" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <Field label="Cliente ideal">
+                <input value={offer.idealCustomer} onChange={(event) => updateOffer("idealCustomer", event.target.value)} placeholder="Clínicas, barbearias, estética, dentistas..." className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <Field label="Descrição curta do produto">
+                <textarea value={offer.description} onChange={(event) => updateOffer("description", event.target.value)} rows={4} placeholder="O que você vende, para quem e qual resultado promete." className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
+              </Field>
+            </div>
+
+            <button type="button" onClick={() => setShowOfferAdvanced((current) => !current)} className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
+              {showOfferAdvanced ? "Ocultar inteligência avançada" : "Configurar dores, objeções e diferenciais"}
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
 
             <AnimatePresence>
-              {customQueries.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex flex-wrap gap-2"
-                >
-                  {customQueries.map((query) => (
-                    <span
-                      key={query}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs"
-                    >
-                      {query}
-
-                      <button
-                        onClick={() => removeCustom(query)}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
+              {showOfferAdvanced && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="mt-3 grid gap-3">
+                    <Field label="Dores que resolve">
+                      <textarea value={offer.painPoints} onChange={(event) => updateOffer("painPoints", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
+                    </Field>
+                    <Field label="Diferenciais">
+                      <textarea value={offer.differentials} onChange={(event) => updateOffer("differentials", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
+                    </Field>
+                    <Field label="Objeções comuns">
+                      <textarea value={offer.objections} onChange={(event) => updateOffer("objections", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
+                    </Field>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
-        )}
+          </motion.div>
 
-        <div className="mt-6 grid grid-cols-2 gap-3 border-t border-border pt-6 md:grid-cols-5">
-          <Field label="Cidade">
-            <input
-              value={city}
-              onChange={(event) => setCity(event.target.value)}
-              placeholder="Belo Horizonte"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="rounded-[1.75rem] border border-primary/20 bg-gradient-to-br from-card/80 to-primary/5 p-5 shadow-xl shadow-primary/5 backdrop-blur"
+          >
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold">
+                  <Radar className="h-4 w-4 text-primary" />
+                  Missão de busca
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Configure nicho, região e limite. O motor consulta a base antes de gastar APIs.
+                </p>
+              </div>
 
-          <Field label="Estado">
-            <Select value={state} onValueChange={setState}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="UF" />
-              </SelectTrigger>
-
-              <SelectContent>
-                {STATES.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Raio (km)">
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={radius}
-              onChange={(event) => setRadius(Number(event.target.value || 1))}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-
-          <Field label="Qtd. máxima">
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={quantity}
-              onChange={(event) => setQuantity(Number(event.target.value || 1))}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
-            />
-          </Field>
-
-          <div className="flex items-end">
-            <Button
-              size="lg"
-              className="w-full gap-2"
-              onClick={start}
-              disabled={running}
-            >
-              {running ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Radar className="h-4 w-4" />
-              )}
-              Iniciar
-            </Button>
-          </div>
-        </div>
-      </motion.div>
-
-      <div className="rounded-2xl border border-border bg-card/60 p-6">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Search className="h-4 w-4 text-primary" />
-              Resultados da busca
+              <div className="inline-flex rounded-xl border border-border bg-background/60 p-1">
+                <button onClick={() => setMode("catalogo")} className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all", mode === "catalogo" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:text-foreground")}>
+                  <Target className="h-3.5 w-3.5" /> Catálogo
+                </button>
+                <button onClick={() => setMode("custom")} className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all", mode === "custom" ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "text-muted-foreground hover:text-foreground")}>
+                  <Zap className="h-3.5 w-3.5" /> Livre
+                </button>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Leads priorizados por aderência à sua oferta, probabilidade de compra, ticket estimado e próxima melhor ação.
-            </p>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportCsv}
-              disabled={!results.length}
-              className="gap-2"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Exportar CSV
-            </Button>
+            <div className="mb-5 flex flex-wrap items-center gap-3 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-background/50 px-3 py-1.5">
+                <input type="checkbox" checked={precisionMode} onChange={(event) => setPrecisionMode(event.target.checked)} className="h-4 w-4 accent-primary" />
+                <Filter className="h-3 w-3" /> Modo precisão
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-background/50 px-3 py-1.5">
+                <input type="checkbox" checked={onlyOpportunity} onChange={(event) => setOnlyOpportunity(event.target.checked)} className="h-4 w-4 accent-primary" />
+                <Globe2 className="h-3 w-3" /> Priorizar lacuna digital
+              </label>
+            </div>
 
-            <span className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              {results.length} lead(s)
-            </span>
-          </div>
-        </div>
+            {mode === "catalogo" ? (
+              <div className="space-y-5">
+                <div className="flex flex-wrap gap-2">
+                  {NICHE_CATALOG.map((item) => (
+                    <button key={item.key} onClick={() => { setCategoryKey(item.key); setNicheKey(item.niches[0].key); }} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold transition-all", categoryKey === item.key ? "border-primary bg-primary/15 text-foreground shadow-lg shadow-primary/10" : "border-border bg-background/50 text-muted-foreground hover:border-primary/40 hover:text-foreground")}>
+                      <span className="mr-1">{item.emoji}</span>{item.label}
+                    </button>
+                  ))}
+                </div>
 
-        {results.length > 0 && !running && (
-          <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <SummaryCard
-              icon={BarChart3}
-              label="Leads encontrados"
-              value={resultSummary.total}
-              description="total da varredura"
-            />
-
-            <SummaryCard
-              icon={Phone}
-              label="Com telefone"
-              value={resultSummary.withPhone}
-              description="prontos para contato"
-            />
-
-            <SummaryCard
-              icon={Globe}
-              label="Com site"
-              value={resultSummary.withWebsite}
-              description="presença digital"
-            />
-
-            <SummaryCard
-              icon={Target}
-              label="Sem site"
-              value={resultSummary.withoutWebsite}
-              description="oportunidade digital"
-            />
-
-            <SummaryCard
-              icon={Star}
-              label="Média"
-              value={
-                resultSummary.avgRating
-                  ? resultSummary.avgRating.toFixed(1)
-                  : "—"
-              }
-              description="avaliação Google"
-            />
-
-            <SummaryCard
-              icon={Flame}
-              label="Potencial"
-              value={`${resultSummary.avgScore}/100`}
-              description={`${resultSummary.hot} leads quentes`}
-            />
-          </div>
-        )}
-
-        {results.length > 0 && !running && (
-          <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/5 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-primary/10 p-2">
-                  <BrainCircuit className="h-5 w-5 text-primary" />
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
+                  {category.niches.map((item) => (
+                    <button key={item.key} onClick={() => setNicheKey(item.key)} className={cn("group rounded-2xl border p-3 text-left transition-all", nicheKey === item.key ? "border-primary bg-primary/15 shadow-lg shadow-primary/10" : "border-border bg-background/50 hover:border-primary/40 hover:bg-muted/40")}>
+                      <div className="text-xl">{item.emoji}</div>
+                      <div className="mt-2 truncate text-sm font-bold">{item.label}</div>
+                      <div className="mt-1 text-[10px] text-muted-foreground">{item.keywords.length} sinais</div>
+                    </button>
+                  ))}
                 </div>
 
                 <div>
-                  <p className="text-sm font-semibold">
-                    Diagnóstico IA da varredura
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {resultSummary.withPhone} leads já possuem telefone para
-                    abordagem, {resultSummary.withoutWebsite} parecem ter lacuna
-                    digital e {resultSummary.hot} entraram como oportunidades
-                    quentes.
-                  </p>
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Sinais semânticos da busca</label>
+                    <span className="text-xs text-primary">{selectedKeywords.length} ativo(s)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {niche.keywords.map((keyword) => {
+                      const active = selectedKeywords.includes(keyword);
+                      return (
+                        <button key={keyword} onClick={() => toggleKeyword(keyword)} className={cn("rounded-full border px-3 py-1.5 text-xs transition-all", active ? "border-primary/60 bg-primary/15 text-foreground" : "border-border bg-background/40 text-muted-foreground hover:text-foreground")}>
+                          {active && <span className="mr-1 text-primary">✓</span>}{keyword}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
+            ) : (
+              <div className="space-y-4">
+                <Field label="Termos personalizados">
+                  <div className="flex gap-2">
+                    <input value={customInput} onChange={(event) => setCustomInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustom(); } }} placeholder="ex: empresas que precisam de automação" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
+                    <Button variant="secondary" onClick={addCustom}><Plus className="h-4 w-4" /></Button>
+                  </div>
+                </Field>
+                {customQueries.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {customQueries.map((query) => (
+                      <span key={query} className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs">
+                        {query}<button onClick={() => removeCustom(query)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-              <Button
-                variant="secondary"
-                size="sm"
-                className="gap-2"
-                onClick={() => {
-                  const bestLead = [...results].sort(
-                    (a, b) => (b.score || 0) - (a.score || 0)
-                  )[0];
+            <div className="mt-6 grid grid-cols-2 gap-3 border-t border-border pt-6 md:grid-cols-5">
+              <Field label="Cidade"><input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Belo Horizonte" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" /></Field>
+              <Field label="Estado">
+                <Select value={state} onValueChange={setState}><SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="UF" /></SelectTrigger><SelectContent>{STATES.map((item) => (<SelectItem key={item} value={item}>{item}</SelectItem>))}</SelectContent></Select>
+              </Field>
+              <Field label="Raio"><input type="number" min={1} max={100} value={radius} onChange={(event) => setRadius(Number(event.target.value || 1))} className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" /></Field>
+              <Field label="Quantidade"><input type="number" min={1} max={100} value={quantity} onChange={(event) => setQuantity(Number(event.target.value || 1))} className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" /></Field>
+              <div className="flex items-end">
+                <Button size="lg" className="h-11 w-full gap-2 rounded-xl font-black shadow-xl shadow-primary/20" onClick={start} disabled={running}>
+                  {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Radar className="h-4 w-4" />}
+                  {running ? "Executando" : "Iniciar"}
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+        </CollapsibleShell>
 
-                  if (bestLead) handleGenerateApproach(bestLead);
-                }}
-              >
-                <MessageSquareText className="h-3.5 w-3.5" />
-                Copiar abordagem do melhor lead
+        <CollapsibleShell
+          title="Oportunidades priorizadas"
+          eyebrow="Fila comercial"
+          description="Mostra primeiro o que vender. Métricas e diagnóstico podem ser recolhidos para a tela não ficar pesada."
+          open={showResultsDetails}
+          onToggle={() => setShowResultsDetails((current) => !current)}
+          rightSlot={results.length ? <span className="rounded-full border border-orange-400/30 bg-orange-400/10 px-3 py-1 text-[11px] font-black text-orange-200">{results.length} oportunidade(s)</span> : null}
+        >
+        <div className="rounded-[1.75rem] border border-border bg-card/70 p-5 shadow-xl shadow-black/5 backdrop-blur">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <Search className="h-4 w-4 text-primary" />
+                Oportunidades priorizadas
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Não é uma lista: é uma fila de abordagem com fit, dor provável, ticket e próxima ação.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {bestLead && (
+                <Button variant="secondary" size="sm" className="gap-2" onClick={() => handleGenerateApproach(bestLead)}>
+                  <MessageSquareText className="h-3.5 w-3.5" /> Melhor abordagem
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={!results.length} className="gap-2">
+                <Download className="h-3.5 w-3.5" /> Exportar CSV
               </Button>
             </div>
           </div>
-        )}
 
-        {running ? (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className="h-56 animate-pulse rounded-xl border border-border bg-muted/30"
-              />
-            ))}
-          </div>
-        ) : results.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-sm text-muted-foreground">
-            <Search className="mb-3 h-10 w-10 opacity-30" />
-            Nenhuma busca executada ainda.
-          </div>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {results.map((lead) => (
-              <LeadCard
-                key={lead.id}
-                lead={lead}
-                saved={savedLeadIds.includes(lead.id)}
-                inCrm={crmLeadIds.includes(lead.id)}
-                approachGenerated={approachLeadIds.includes(lead.id)}
-                onSave={handleSaveLead}
-                onSendToCrm={handleSendToCrm}
-                onGenerateApproach={handleGenerateApproach}
-                onOpenWebsite={handleOpenWebsite}
-                onOpenMaps={handleOpenMaps}
-                onOpenWhatsApp={handleOpenWhatsApp}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-border bg-card/60 p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Search className="h-4 w-4 text-primary" />
-              Histórico de buscas
+          {results.length > 0 && !running && showResultsDetails && (
+            <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+              <SummaryCard icon={BarChart3} label="Encontrados" value={resultSummary.total} description="oportunidades" />
+              <SummaryCard icon={Phone} label="Contatáveis" value={resultSummary.withPhone} description="telefone/WhatsApp" />
+              <SummaryCard icon={Globe} label="Com site" value={resultSummary.withWebsite} description="presença digital" />
+              <SummaryCard icon={Target} label="Lacuna" value={resultSummary.withoutWebsite} description="sem site" />
+              <SummaryCard icon={Star} label="Média" value={resultSummary.avgRating ? resultSummary.avgRating.toFixed(1) : "—"} description="Google" />
+              <SummaryCard icon={Flame} label="NXA Score" value={`${resultSummary.avgScore}/100`} description={`${resultSummary.hot} quentes`} />
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Reabra, repita ou envie buscas anteriores para o Radar.
-            </p>
-          </div>
+          )}
 
-          <span className="text-xs text-muted-foreground">
-            {searches.length} registro(s)
-          </span>
-        </div>
-
-        {loadingHistory ? (
-          <div className="text-sm text-muted-foreground">
-            Carregando histórico...
-          </div>
-        ) : searches.length === 0 ? (
-          <div className="text-sm text-muted-foreground">
-            Nenhuma busca ainda.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {searches.map((search) => {
-              const leads = Array.isArray(search.results)
-                ? search.results
-                : Array.isArray(search.leads)
-                  ? search.leads
-                  : [];
-
-              return (
-                <div
-                  key={search.id}
-                  className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3 transition-colors hover:bg-muted/40 md:flex-row md:items-center md:justify-between"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
-                      {search.niche || search.query || "Busca"}
-                      <span className="text-muted-foreground">
-                        {" "}
-                        · {search.city || "—"} / {search.state || "—"}
-                      </span>
-                    </div>
-
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {search.created_at
-                        ? new Date(search.created_at).toLocaleString("pt-BR")
-                        : "Data não informada"}{" "}
-                      · {search.results_count || leads.length || 0} resultados ·{" "}
-                      {search.credits_used || 0} créditos
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusPill status={search.status || "completed"} />
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5"
-                      onClick={() => handleRepeatSearch(search)}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      Ver
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5"
-                      onClick={() => {
-                        handleRepeatSearch(search);
-                        setTimeout(() => {
-                          saveLastSearchForRadar({
-                            ...search,
-                            results: leads,
-                            leads,
-                          });
-                        }, 0);
-                      }}
-                    >
-                      <Radar className="h-3.5 w-3.5" />
-                      Radar
-                    </Button>
-
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="h-8 gap-1.5"
-                      onClick={() => {
-                        if (search.city) setCity(search.city);
-                        if (search.state) setState(search.state);
-                        if (search.radius_km) setRadius(Number(search.radius_km));
-                        if (search.quantity) setQuantity(Number(search.quantity));
-
-                        toast({
-                          title: "Parâmetros recuperados",
-                          description:
-                            "Revise os filtros e clique em Iniciar para executar de novo.",
-                        });
-                      }}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Repetir
-                    </Button>
+          {results.length > 0 && !running && showResultsDetails && (
+            <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]">
+              <div className="rounded-2xl border border-primary/25 bg-primary/10 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-primary/15 p-2"><BrainCircuit className="h-5 w-5 text-primary" /></div>
+                  <div>
+                    <p className="text-sm font-bold">Diagnóstico comercial da varredura</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {resultSummary.withPhone} leads prontos para abordagem, {resultSummary.withoutWebsite} com lacuna digital e {resultSummary.hot} oportunidades quentes para atacar primeiro.
+                    </p>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+
+              <div className="rounded-2xl border border-border bg-background/50 p-4">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Melhor alvo agora</div>
+                <div className="mt-2 truncate text-sm font-black">{bestLead?.name || "—"}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{bestLead ? `${bestLead.ai_fit_score || bestLead.score}/100 de fit` : "Execute uma busca"}</div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-background/50 p-4">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Próxima ação</div>
+                <div className="mt-2 text-sm font-black">{bestLead?.ai_next_action || "Começar pelos scores acima de 75"}</div>
+              </div>
+            </div>
+          )}
+
+          {running ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="relative h-64 overflow-hidden rounded-2xl border border-border bg-muted/20">
+                  <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-primary/10 to-transparent" />
+                </div>
+              ))}
+            </div>
+          ) : results.length === 0 ? (
+            <div className="flex min-h-[280px] flex-col items-center justify-center rounded-3xl border border-dashed border-border bg-background/35 py-16 text-center text-sm text-muted-foreground">
+              <BrainCircuit className="mb-4 h-12 w-12 text-primary/50" />
+              Configure a missão e inicie a varredura inteligente.
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visibleResults.map((lead, index) => (
+                <div key={lead.id} className="relative">
+                  {index < 3 && <div className="absolute -top-2 left-4 z-10 rounded-full border border-orange-400/40 bg-orange-500/15 px-2 py-0.5 text-[10px] font-black text-orange-300">TOP {index + 1}</div>}
+                  <LeadCard lead={lead} saved={savedLeadIds.includes(lead.id)} inCrm={crmLeadIds.includes(lead.id)} approachGenerated={approachLeadIds.includes(lead.id)} onSave={handleSaveLead} onSendToCrm={handleSendToCrm} onGenerateApproach={handleGenerateApproach} onOpenWebsite={handleOpenWebsite} onOpenMaps={handleOpenMaps} onOpenWhatsApp={handleOpenWhatsApp} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {results.length > 6 && !running && (
+            <div className="mt-5 flex justify-center">
+              <Button variant="outline" className="rounded-xl px-6 font-black" onClick={() => setVisibleResultsCount((current) => current >= results.length ? 6 : Math.min(results.length, current + 6))}>
+                {visibleResultsCount >= results.length ? "Recolher oportunidades" : `Expandir mais ${Math.min(6, results.length - visibleResultsCount)} oportunidades`}
+              </Button>
+            </div>
+          )}
+        </div>
+        </CollapsibleShell>
+
+        <CollapsibleShell
+          title="Central de varreduras"
+          eyebrow="Mission replay"
+          description="Histórico recolhível para recuperar buscas sem transformar a página em lista infinita."
+          open={showHistoryPanel}
+          onToggle={() => setShowHistoryPanel((current) => !current)}
+          rightSlot={<span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-black text-primary">{searches.length} registro(s)</span>}
+        >
+        <div className="relative overflow-hidden rounded-[2rem] border border-primary/20 bg-gradient-to-br from-card/90 via-background/80 to-card/60 p-5 shadow-2xl shadow-primary/5 backdrop-blur">
+          <div className="pointer-events-none absolute inset-0 opacity-70">
+            <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+            <div className="absolute -bottom-24 left-1/4 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
           </div>
-        )}
+
+          <div className="relative mb-5 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-primary">
+                  <Radar className="h-3.5 w-3.5" /> Mission Replay
+                </span>
+                <span className="rounded-full border border-border bg-background/60 px-3 py-1 text-[11px] font-bold text-muted-foreground">
+                  Histórico inteligente
+                </span>
+              </div>
+              <h2 className="mt-3 text-xl font-black tracking-tight text-foreground md:text-2xl">Central de varreduras</h2>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Reabra operações, restaure filtros, envie resultados ao Radar e reutilize inteligência já coletada sem deixar a tela com cara de lista simples.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-2xl border border-border bg-background/55 px-4 py-3">
+                <div className="text-lg font-black text-primary">{searches.length}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">operações</div>
+              </div>
+              <div className="rounded-2xl border border-border bg-background/55 px-4 py-3">
+                <div className="text-lg font-black text-orange-300">{searches.reduce((sum, item: any) => sum + Number(item.results_count || item.total || 0), 0)}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">leads</div>
+              </div>
+              <div className="rounded-2xl border border-border bg-background/55 px-4 py-3">
+                <div className="text-lg font-black text-emerald-300">{searches.filter((item: any) => (item.status || "completed") === "completed").length}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">concluídas</div>
+              </div>
+            </div>
+          </div>
+
+          {loadingHistory ? (
+            <div className="relative grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="h-44 animate-pulse rounded-3xl border border-border bg-muted/20" />
+              ))}
+            </div>
+          ) : searches.length === 0 ? (
+            <div className="relative flex min-h-[220px] flex-col items-center justify-center rounded-3xl border border-dashed border-border bg-background/40 text-center">
+              <BrainCircuit className="mb-3 h-10 w-10 text-primary/50" />
+              <div className="text-sm font-bold">Nenhuma missão registrada ainda</div>
+              <p className="mt-1 text-xs text-muted-foreground">Execute sua primeira busca para criar um histórico operacional reutilizável.</p>
+            </div>
+          ) : (
+            <div className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visibleSearches.map((search, index) => {
+                const leads = Array.isArray(search.results) ? search.results : Array.isArray(search.leads) ? search.leads : [];
+                const count = Number(search.results_count || search.total || leads.length || 0);
+                const credits = Number(search.credits_used || count * CREDIT_COST_PER_LEAD || 0);
+                const completed = (search.status || "completed") === "completed";
+                const dateLabel = search.created_at ? new Date(search.created_at).toLocaleString("pt-BR") : "Data não informada";
+                const title = search.niche || search.query || "Busca operacional";
+                const location = `${search.city || "—"} / ${search.state || "—"}`;
+                const density = count >= 40 ? "Alta base" : count >= 20 ? "Base validada" : "Base curta";
+
+                return (
+                  <motion.div
+                    key={search.id || `${title}-${index}`}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(index * 0.03, 0.2) }}
+                    className="group relative overflow-hidden rounded-3xl border border-border bg-background/55 p-4 shadow-lg shadow-black/10 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-background/75 hover:shadow-primary/10"
+                  >
+                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-cyan-400 to-orange-400 opacity-70" />
+                    <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl transition-all group-hover:bg-primary/20" />
+
+                    <div className="relative flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-primary">
+                            <Search className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-black text-foreground">{title}</div>
+                            <div className="mt-0.5 truncate text-xs font-medium text-muted-foreground">{location}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <StatusPill status={completed ? "completed" : search.status || "pending"} />
+                    </div>
+
+                    <div className="relative mt-4 grid grid-cols-3 gap-2">
+                      <div className="rounded-2xl border border-border bg-card/60 p-3">
+                        <div className="text-lg font-black text-primary">{count}</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">leads</div>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-card/60 p-3">
+                        <div className="text-lg font-black text-emerald-300">{credits}</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">créditos</div>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-card/60 p-3">
+                        <div className="text-xs font-black text-orange-300">{density}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">sinal</div>
+                      </div>
+                    </div>
+
+                    <div className="relative mt-4 rounded-2xl border border-border bg-card/40 p-3">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Registro</div>
+                      <div className="mt-1 text-xs font-semibold text-foreground">{dateLabel}</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">{search.radius_km || radius} km</span>
+                        <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] font-bold text-cyan-200">{search.precision || "precisão IA"}</span>
+                        <span className="rounded-full border border-orange-400/20 bg-orange-400/10 px-2 py-1 text-[10px] font-bold text-orange-200">{search.only_opportunity ? "oportunidade" : "mercado amplo"}</span>
+                      </div>
+                    </div>
+
+                    <div className="relative mt-4 grid grid-cols-2 gap-2">
+                      <Button size="sm" className="h-9 gap-1.5 rounded-xl font-black" onClick={() => handleOpenHistory(search)}>
+                        <Eye className="h-3.5 w-3.5" /> Abrir
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl font-bold" onClick={() => handleSendHistoryToRadar(search)}>
+                        <Radar className="h-3.5 w-3.5" /> Radar
+                      </Button>
+                      <Button variant="secondary" size="sm" className="col-span-2 h-9 gap-1.5 rounded-xl font-bold" onClick={() => handleRecoverHistoryParameters(search)}>
+                        <RefreshCw className="h-3.5 w-3.5" /> Recuperar filtros
+                      </Button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+
+          {searches.length > 6 && (
+            <div className="relative mt-5 flex justify-center">
+              <Button variant="outline" className="rounded-xl px-6 font-black" onClick={() => setVisibleHistoryCount((current) => current >= searches.length ? 6 : Math.min(searches.length, current + 6))}>
+                {visibleHistoryCount >= searches.length ? "Recolher histórico" : `Expandir mais ${Math.min(6, searches.length - visibleHistoryCount)} varreduras`}
+              </Button>
+            </div>
+          )}
+        </div>
+        </CollapsibleShell>
       </div>
     </div>
+  );
+}
+
+function CollapsibleShell({ title, eyebrow, description, open, onToggle, rightSlot, children }: { title: string; eyebrow: string; description?: string; open: boolean; onToggle: () => void; rightSlot?: React.ReactNode; children: React.ReactNode; }) {
+  return (
+    <section className="overflow-hidden rounded-[2rem] border border-border/80 bg-card/45 shadow-xl shadow-black/5 backdrop-blur">
+      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-muted/20 lg:px-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-primary"><Layers3 className="h-4 w-4" /></div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-primary">{eyebrow}</div>
+            <h2 className="mt-1 text-lg font-black tracking-tight text-foreground md:text-xl">{title}</h2>
+            {description && <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{description}</p>}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {rightSlot}
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background/60 text-muted-foreground">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+        </div>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.24 }} className="overflow-hidden">
+            <div className="px-4 pb-5 lg:px-5">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
   );
 }
 
