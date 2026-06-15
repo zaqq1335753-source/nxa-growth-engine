@@ -1,3 +1,4 @@
+// BUSCA FINAL CORRIGIDA - sem tempPresentation, sem posicionamento genérico, oferta como base real da análise
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -32,10 +33,7 @@ import {
   ExternalLink,
   ArrowUpRight,
   Wand2,
-  DollarSign,
-  Users,
   Lightbulb,
-  Gauge,
   ChevronDown,
   ChevronUp,
   Layers3,
@@ -76,6 +74,9 @@ type Lead = {
   phone?: string;
   website?: string;
   maps_url?: string;
+  place_id?: string | null;
+  source?: string;
+  real_data?: boolean;
   google_rating?: number;
   google_reviews_count?: number;
   score: number;
@@ -97,6 +98,14 @@ type Lead = {
   ai_confidence?: number;
   ai_segments_matched?: string[];
   ai_strategy_tags?: string[];
+  ai_customer_summary?: string;
+  ai_opportunity?: string;
+  ai_offer_recommendation?: string;
+  ai_approach_summary?: string;
+  ai_priority_label?: string;
+  ai_interest_label?: string;
+  ai_why_this_lead?: string;
+  ai_best_channel?: string;
 };
 
 type Category = {
@@ -352,6 +361,10 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function getScoreColor(score: number) {
   if (score >= 81) return "#f87171";
   if (score >= 61) return "#fb923c";
@@ -403,6 +416,159 @@ const DEFAULT_SALES_OFFER: SalesOffer = {
     "Já tenho alguém respondendo, estou sem tempo, acho caro, não sei se IA funciona para meu negócio.",
 };
 
+
+type OfferIntelligence = {
+  summary: string;
+  offerSummary: string;
+  idealCustomer: string;
+  painPoints: string;
+  differentials: string;
+  objections: string;
+  suggestedQueries: string[];
+  searchStrategy: string;
+  confidence: number;
+};
+
+function uniqueTerms(items: string[]) {
+  return Array.from(
+    new Set(
+      items
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length >= 3)
+    )
+  );
+}
+
+function buildSearchTermsFromOffer(offer: SalesOffer, source: string) {
+  const explicitIdeal = splitTerms(offer.idealCustomer || "");
+  const explicitDescription = splitTerms(offer.description || "");
+  const nameTerms = splitTerms(offer.name || "");
+
+  const petTerms = /banho|tosa|pet|cachorro|gato|veterin|animal|petshop|pet shop|ração/.test(source)
+    ? ["pet shop", "banho e tosa", "clínica veterinária", "hotel pet", "creche pet", "loja de ração"]
+    : [];
+
+  const automationTerms = /whatsapp|agenda|agendamento|crm|follow|lead|atendimento|chatbot|ia|automacao/.test(source)
+    ? ["clínica de estética", "barbearia", "clínica odontológica", "salão de beleza", "pet shop", "academia"]
+    : [];
+
+  const marketingTerms = /marketing|trafego|anuncio|google ads|meta ads|social media|landing|site|funil|prospeccao/.test(source)
+    ? ["clínica estética", "clínica odontológica", "imobiliária", "academia", "restaurante", "escola particular"]
+    : [];
+
+  const furnitureTerms = /cadeira|mesa|moveis|mobiliario|ergonom|poltrona|escritorio/.test(source)
+    ? ["escritório de contabilidade", "escritório de advocacia", "clínica", "consultório", "imobiliária", "coworking"]
+    : [];
+
+  const cleaningTerms = /limpeza|higienizacao|impermeabilizacao|sofa|colchao|tapete|estofado|lavagem/.test(source)
+    ? ["hotel", "pousada", "clínica", "academia", "restaurante", "condomínio"]
+    : [];
+
+  return uniqueTerms([
+    ...explicitIdeal,
+    ...petTerms,
+    ...automationTerms,
+    ...marketingTerms,
+    ...furnitureTerms,
+    ...cleaningTerms,
+    ...explicitDescription,
+    ...nameTerms,
+  ]).slice(0, 8);
+}
+
+function inferOfferIntelligence(offer: SalesOffer): OfferIntelligence {
+  const productName = offer.name?.trim() || "Oferta do cliente";
+  const description = offer.description?.trim();
+  const ideal = offer.idealCustomer?.trim();
+  const pains = offer.painPoints?.trim();
+  const diffs = offer.differentials?.trim();
+  const objections = offer.objections?.trim();
+
+  const source = normalizeText([
+    offer.name,
+    offer.description,
+    offer.idealCustomer,
+    offer.painPoints,
+    offer.differentials,
+    offer.objections,
+  ].join(" "));
+
+  const hasPet = /banho|tosa|pet|cachorro|gato|veterin|animal|petshop|pet shop|ração/.test(source);
+  const hasAutomation = /whatsapp|agenda|agendamento|crm|follow|lead|atendimento|chatbot|ia|automacao/.test(source);
+  const hasMarketing = /marketing|trafego|anuncio|google ads|meta ads|social media|landing|site|funil|prospeccao/.test(source);
+  const hasFurniture = /cadeira|mesa|moveis|mobiliario|ergonom|poltrona|escritorio/.test(source);
+  const hasCleaning = /limpeza|higienizacao|impermeabilizacao|sofa|colchao|tapete|estofado|lavagem/.test(source);
+
+  let detectedCategory = "oferta comercial";
+  let defaultIdeal = "Empresas locais com operação ativa, atendimento comercial, recorrência de clientes e capacidade de compra.";
+  let defaultPains = "Baixa eficiência, perda de oportunidades, dificuldade operacional, falta de previsibilidade e necessidade de melhorar resultados.";
+  let defaultDiffs = "Atendimento consultivo, solução prática, implantação simples, ganho operacional e foco em resultado para o cliente.";
+  let defaultObjections = "Preço, falta de tempo, comparação com fornecedores atuais, dúvida sobre retorno e baixa urgência percebida.";
+  let searchStrategy = "Buscar empresas que apresentem sinais de necessidade, capacidade financeira e canal de contato direto para abordagem.";
+
+  if (hasPet) {
+    detectedCategory = "serviço/produto do mercado pet";
+    defaultIdeal = "Pet shops, clínicas veterinárias, banho e tosa, hotéis pet, creches pet, lojas de ração e negócios do ecossistema pet.";
+    defaultPains = "Tutoria com pouco tempo, recorrência de cuidado, necessidade de confiança, higiene, segurança no atendimento e facilidade para agendar.";
+    defaultDiffs = "Cuidado com cães e gatos, atendimento claro pelo WhatsApp, higiene, recorrência, carinho no manuseio e experiência tranquila para o tutor.";
+    defaultObjections = "Preço, medo do pet se estressar, preferência por fazer em casa, falta de tempo para levar, comparação com outro fornecedor e receio com animais sensíveis.";
+    searchStrategy = "Como a busca encontra empresas, a IA vai procurar negócios do ecossistema pet que tenham aderência, parceria, indicação, revenda ou demanda relacionada à oferta.";
+  }
+
+  if (hasAutomation) {
+    detectedCategory = "automação comercial/atendimento";
+    defaultIdeal = "Clínicas, estética, odontologia, barbearias, salões, pet shops, academias, escolas, imobiliárias e negócios que vendem pelo WhatsApp.";
+    defaultPains = "Demora para responder, perda de mensagens, agenda bagunçada, no-show, falta de follow-up, baixa conversão e equipe sobrecarregada.";
+    defaultDiffs = "IA 24h, agendamento automático, follow-up inteligente, CRM, priorização de leads e mensagens personalizadas.";
+    defaultObjections = "Já tenho atendente, acho caro, não sei se IA funciona, medo de respostas erradas e falta de tempo para configurar.";
+    searchStrategy = "Priorizar empresas com alto volume de WhatsApp, dependência de agenda, recorrência e dor clara de atendimento/follow-up.";
+  }
+
+  if (hasMarketing) {
+    detectedCategory = "aquisição de clientes/marketing";
+    defaultIdeal = "Clínicas, estética, odontologia, imobiliárias, escolas, restaurantes, lojas, academias, pet shops, barbearias e prestadores locais.";
+    defaultPains = "Poucos clientes novos, dependência de indicação, presença digital fraca, anúncios ruins, baixo volume de leads e falta de previsibilidade.";
+    defaultDiffs = "Estratégia local, criativos, página de conversão, acompanhamento de métricas, otimização e foco em vendas reais.";
+    defaultObjections = "Já tentei anúncios e não deu certo, acho caro, não tenho verba, medo de gastar sem retorno e dúvida sobre demanda online.";
+    searchStrategy = "Buscar empresas competitivas, com ticket viável e presença digital que possa ser melhorada.";
+  }
+
+  if (hasFurniture) {
+    detectedCategory = "mobiliário/estrutura física";
+    defaultIdeal = "Escritórios, contabilidades, advocacias, clínicas, consultórios, imobiliárias, coworkings, agências e empresas em expansão.";
+    defaultPains = "Móveis antigos, desconforto da equipe, falta de ergonomia, ambiente pouco profissional, expansão ou reforma.";
+    defaultDiffs = "Produtos confortáveis, visual profissional, opções corporativas, entrega rápida, atendimento consultivo e montagem facilitada.";
+    defaultObjections = "Está caro, já tenho móveis, vou deixar para depois, preciso medir o espaço, medo da qualidade e comparação com fornecedores.";
+    searchStrategy = "Buscar empresas com estrutura física, atendimento presencial, equipe administrativa ou sinais de expansão/reforma.";
+  }
+
+  if (hasCleaning) {
+    detectedCategory = "limpeza/higienização";
+    defaultIdeal = "Hotéis, pousadas, clínicas, consultórios, escolas, creches, academias, restaurantes, condomínios, imobiliárias e espaços de atendimento.";
+    defaultPains = "Mau cheiro, manchas, ácaros, aparência ruim, alto fluxo de pessoas, manutenção recorrente e reclamação de clientes.";
+    defaultDiffs = "Higienização profunda, atendimento no local, eliminação de odores, impermeabilização, agenda rápida e serviço recorrente.";
+    defaultObjections = "Acho caro, não está tão sujo, posso deixar para depois, medo de molhar demais, já tenho fornecedor e preciso ver disponibilidade.";
+    searchStrategy = "Priorizar empresas com ambiente físico e alto fluxo de pessoas, onde higiene e aparência impactam percepção do cliente.";
+  }
+
+  const suggestedQueries = buildSearchTermsFromOffer(offer, source);
+  const hasUserContext = [description, ideal, pains, diffs, objections].filter(Boolean).length;
+  const confidence = clamp(48 + hasUserContext * 10 + (suggestedQueries.length >= 4 ? 10 : 0) + (source.length > 80 ? 8 : 0), 42, 96);
+
+  return {
+    summary: `A IA usou a oferta cadastrada "${productName}" como base principal. A priorização dos leads será feita pelo cruzamento entre produto, cliente ideal, dores resolvidas, segmento, contato, presença digital e sinais comerciais.`,
+    offerSummary: description
+      ? description
+      : `${productName}. Complete a descrição para a IA entender melhor o resultado que o cliente compra.`,
+    idealCustomer: ideal || defaultIdeal,
+    painPoints: pains || defaultPains,
+    differentials: diffs || defaultDiffs,
+    objections: objections || defaultObjections,
+    suggestedQueries: suggestedQueries.length ? suggestedQueries : ["empresa local", "prestador de serviço", "clínica", "loja", "escritório"],
+    searchStrategy,
+    confidence,
+  };
+}
 function readSalesOfferStorage(): SalesOffer {
   try {
     const raw = localStorage.getItem("nxa_sales_offer_v2");
@@ -448,6 +614,74 @@ function getOfferFitLabel(score: number) {
   if (score >= 72) return "Alta aderência";
   if (score >= 55) return "Precisa qualificar";
   return "Baixa prioridade";
+}
+
+function getCustomerPriorityLabel(score: number) {
+  if (score >= 86) return "🟢 Excelente oportunidade";
+  if (score >= 72) return "🟢 Alta prioridade";
+  if (score >= 55) return "🟡 Vale qualificar";
+  return "🔴 Baixa prioridade";
+}
+
+function getInterestLabel(score: number) {
+  if (score >= 82) return "Alta";
+  if (score >= 62) return "Média";
+  return "Baixa";
+}
+
+function buildCustomerOpportunityText(params: {
+  lead: Lead;
+  offer: SalesOffer;
+  score: number;
+  matchedRule?: { label: string; reason: string; pains: string[] };
+  pains: string[];
+  hasStrongRuleMatch: boolean;
+  idealMatches: string[];
+}) {
+  const { lead, offer, score, matchedRule, pains, hasStrongRuleMatch, idealMatches } = params;
+  const offerName = offer.name?.trim() || "sua oferta";
+  const mainPain = pains[0] || "possível melhoria comercial";
+  const secondPain = pains[1] || "oportunidade de ganho operacional";
+
+  const why = hasStrongRuleMatch
+    ? `A NXA encontrou este lead porque o perfil da empresa combina com a oferta cadastrada. O segmento indica uma possível dor em ${mainPain} e ${secondPain}.`
+    : idealMatches.length
+      ? `A NXA encontrou termos do cliente ideal neste lead. Antes de vender, vale confirmar se a empresa realmente sofre com ${mainPain}.`
+      : `A NXA encontrou dados públicos suficientes para qualificação, mas ainda não existe aderência forte com a oferta. Use como lead secundário.`;
+
+  const opportunity = score >= 72
+    ? `Existe uma boa abertura para apresentar ${offerName}, principalmente conectando a oferta com ${mainPain}.`
+    : score >= 55
+      ? `Pode existir oportunidade, mas a primeira mensagem deve validar a dor antes de apresentar ${offerName}.`
+      : `Não parece ser prioridade para venda direta agora. Melhor usar em nutrição ou abordagem mais leve.`;
+
+  const offerRecommendation = score >= 72
+    ? `Vender ${offerName} como solução para reduzir perdas, melhorar operação e gerar mais resultado no atendimento ou processo comercial.`
+    : score >= 55
+      ? `Apresentar ${offerName} somente depois de confirmar necessidade, responsável pela decisão e momento de compra.`
+      : `Não iniciar com proposta. Primeiro entender cenário, volume de demanda e se existe dor real.`;
+
+  const channel = lead.phone ? "WhatsApp" : lead.website ? "Site" : "Maps";
+  const approach = channel === "WhatsApp"
+    ? `Abordar pelo WhatsApp com mensagem curta. Comece falando da oportunidade percebida e evite abrir a conversa falando preço.`
+    : channel === "Site"
+      ? `Usar o site para localizar um contato comercial e iniciar com uma pergunta de diagnóstico.`
+      : `Abrir no Maps, validar dados de contato e qualificar antes de salvar como oportunidade principal.`;
+
+  const summary = score >= 72
+    ? `A NXA identificou que este negócio pode se beneficiar da sua oferta porque possui sinais comerciais compatíveis com o que você vende.`
+    : score >= 55
+      ? `A NXA identificou um possível encaixe, mas recomenda qualificar antes de tratar como oportunidade quente.`
+      : `A NXA recomenda baixa prioridade neste lead, pois os sinais de compra ainda são fracos para a oferta cadastrada.`;
+
+  return {
+    why,
+    opportunity,
+    offerRecommendation,
+    approach,
+    summary,
+    channel,
+  };
 }
 
 function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
@@ -668,6 +902,14 @@ function analyzeLeadForOffer(lead: Lead, offer: SalesOffer): Lead {
       financial >= 70 ? "bom potencial financeiro" : "ticket a validar",
       response >= 70 ? "contato fácil" : "contato difícil",
     ],
+    ai_customer_summary: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).summary,
+    ai_opportunity: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).opportunity,
+    ai_offer_recommendation: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).offerRecommendation,
+    ai_approach_summary: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).approach,
+    ai_priority_label: getCustomerPriorityLabel(score),
+    ai_interest_label: getInterestLabel(probability),
+    ai_why_this_lead: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).why,
+    ai_best_channel: buildCustomerOpportunityText({ lead, offer, score, matchedRule, pains: uniquePains, hasStrongRuleMatch, idealMatches }).channel,
     status: score >= 86 ? "prioridade_ia" : score >= 72 ? "fit_alto" : score >= 55 ? "qualificar" : "nutrir",
   };
 }
@@ -784,13 +1026,24 @@ function makeLocalLeads(params: {
 }
 
 async function searchLeads(body: any): Promise<Lead[]> {
+  const payload = {
+    niche: body.niche || body.query,
+    query: body.query || body.niche,
+    queries: body.queries || [],
+    included_types: body.included_types || [],
+    city: body.city,
+    state: body.state,
+    radius_km: body.radius_km,
+    precision: body.precision,
+    only_opportunity: body.only_opportunity,
+    sales_offer: body.sales_offer,
+    ai_scoring: body.ai_scoring,
+    limit: body.quantity || body.limit || 20,
+    quantity: body.quantity || body.limit || 20,
+  };
+
   const { data, error } = await supabase.functions.invoke("bright-worker", {
-    body: {
-      niche: body.niche || body.query,
-      city: body.city,
-      state: body.state,
-      limit: body.quantity || 20,
-    },
+    body: payload,
   });
 
   console.log("RETORNO GOOGLE PLACES:", data);
@@ -803,26 +1056,69 @@ async function searchLeads(body: any): Promise<Lead[]> {
     throw new Error(data?.error || "Erro ao buscar no Google Places");
   }
 
-  const raw = Array.isArray(data?.leads) ? data.leads : [];
+  const raw = Array.isArray(data?.leads)
+    ? data.leads
+    : Array.isArray(data?.results)
+      ? data.results
+      : [];
 
-  return raw.map((item: any, index: number) => ({
-    id: String(item.id || item.place_id || `google-${index}`),
-    place_id: item.place_id || item.id || null,
-    name: item.name || "Empresa sem nome",
-    segment: body.niche || body.query,
-    city: body.city,
-    state: body.state,
-    address: item.address || "",
-    phone: item.phone || "",
-    website: item.website || "",
-    maps_url: item.maps_url || "",
-    google_rating: Number(item.rating || 0),
-    google_reviews_count: Number(item.reviews || 0),
-    score: Number(item.score || 70),
-    status: "new",
-    source: "google_places",
-    real_data: true,
-  }));
+  return raw.map((item: any, index: number) => {
+    const placeId = item.place_id || item.id || item.google_place_id || null;
+    const phone = item.phone || item.internationalPhoneNumber || item.formatted_phone_number || "";
+    const rating = Number(item.rating || item.google_rating || 0);
+    const reviews = Number(item.reviews || item.user_ratings_total || item.google_reviews_count || 0);
+    const baseScore = Number(item.score || item.ai_fit_score || 0);
+
+    return {
+      id: String(placeId || `${body.city}-${body.state}-${item.name || "lead"}-${index}`),
+      place_id: placeId,
+      name: item.name || item.displayName?.text || item.displayName || "Empresa sem nome",
+      segment: item.segment || item.category || body.niche || body.query,
+      city: item.city || body.city,
+      state: item.state || body.state,
+      address: item.address || item.formattedAddress || item.formatted_address || "",
+      phone,
+      website: item.website || item.websiteUri || item.website_uri || "",
+      maps_url: item.maps_url || item.googleMapsUri || item.google_maps_uri || "",
+      google_rating: rating,
+      google_reviews_count: reviews,
+      score: baseScore > 0 ? baseScore : 70,
+      status: "new",
+      source: "google_places",
+      real_data: true,
+    } as Lead;
+  });
+}
+
+function leadDedupKey(lead: Lead) {
+  const phone = onlyDigits(lead.phone);
+  if (phone) return `phone:${phone}`;
+  const normalized = normalizeText([lead.name, lead.city, lead.state].filter(Boolean).join("|"));
+  return `name:${normalized}`;
+}
+
+function dedupeLeads(leads: Lead[]) {
+  const map = new Map<string, Lead>();
+
+  for (const lead of leads) {
+    const key = leadDedupKey(lead);
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, lead);
+      continue;
+    }
+
+    const currentScore = Number(current.ai_fit_score || current.score || 0);
+    const nextScore = Number(lead.ai_fit_score || lead.score || 0);
+    if (nextScore > currentScore) map.set(key, { ...current, ...lead });
+  }
+
+  return Array.from(map.values());
+}
+
+function shouldKeepOpportunity(lead: Lead) {
+  const score = Number(lead.ai_fit_score || lead.score || 0);
+  return score >= 55 && Boolean(lead.phone || lead.website || (lead.google_reviews_count || 0) >= 10);
 }
 
 function getOpportunityReason(lead: Lead) {
@@ -1046,6 +1342,8 @@ export function Busca() {
   const [crmLeadIds, setCrmLeadIds] = React.useState<string[]>([]);
   const [approachLeadIds, setApproachLeadIds] = React.useState<string[]>([]);
   const [offer, setOffer] = React.useState<SalesOffer>(() => readSalesOfferStorage());
+  const [offerInsight, setOfferInsight] = React.useState<OfferIntelligence | null>(() => inferOfferIntelligence(readSalesOfferStorage()));
+  const [analyzingOffer, setAnalyzingOffer] = React.useState(false);
   const [showOfferAdvanced, setShowOfferAdvanced] = React.useState(false);
   const [aiScoringEnabled, setAiScoringEnabled] = React.useState(true);
   const [engineStage, setEngineStage] = React.useState(0);
@@ -1084,6 +1382,7 @@ export function Busca() {
 
   React.useEffect(() => {
     writeSalesOfferStorage(offer);
+    setOfferInsight(inferOfferIntelligence(offer));
   }, [offer]);
 
   React.useEffect(() => {
@@ -1101,6 +1400,55 @@ export function Busca() {
 
   function updateOffer<K extends keyof SalesOffer>(key: K, value: SalesOffer[K]) {
     setOffer((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyOfferIntelligenceToSearch(insight: OfferIntelligence) {
+    const cleanQueries = Array.from(new Set(insight.suggestedQueries.map((item) => item.trim()).filter(Boolean))).slice(0, 8);
+    if (!cleanQueries.length) return;
+    setMode("custom");
+    setCustomQueries(cleanQueries);
+    setCustomInput("");
+    setOnlyOpportunity(true);
+    setPrecisionMode(true);
+    toast({
+      title: "Busca alinhada com a oferta",
+      description: `${cleanQueries.length} termos inteligentes foram aplicados na missão de busca.`,
+    });
+  }
+
+  async function analyzeAndFillOffer() {
+    if (!offer.name.trim() && !offer.description.trim()) {
+      toast({
+        title: "Informe a oferta primeiro",
+        description: "Digite pelo menos o nome do produto ou uma descrição curta para a IA estruturar a análise.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setAnalyzingOffer(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 650));
+
+    const insight = inferOfferIntelligence(offer);
+    const enrichedOffer: SalesOffer = {
+      ...offer,
+      idealCustomer: insight.idealCustomer,
+      painPoints: insight.painPoints,
+      differentials: insight.differentials,
+      objections: insight.objections,
+      description: offer.description?.trim() || insight.offerSummary,
+    };
+
+    setOffer(enrichedOffer);
+    setOfferInsight(insight);
+    setShowOfferAdvanced(true);
+    applyOfferIntelligenceToSearch(insight);
+    setAnalyzingOffer(false);
+
+    toast({
+      title: "Oferta analisada",
+      description: "A IA preencheu dores, diferenciais, objeções e preparou os termos de busca para cruzar com os leads.",
+    });
   }
 
   async function loadCredits() {
@@ -1148,36 +1496,51 @@ export function Busca() {
       throw new Error("Faça login para usar a busca.");
     }
 
-    const { data, error } = await supabase
-      .from("wallets")
-      .select("credits")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    if (requiredCredits <= 0) return Number(credits || 0);
 
-    if (error) throw error;
+    // Leitura tolerante para não travar a busca quando o projeto ainda está com
+    // schema antigo ou nome de carteira diferente. O bloqueio só acontece quando
+    // conseguimos ler a carteira com segurança.
+    const walletReads = [
+      () => supabase.from("wallets").select("credits").eq("user_id", user.id).maybeSingle(),
+      () => supabase.from("user_wallets").select("credits").eq("user_id", user.id).maybeSingle(),
+    ];
 
-    const currentCredits = Number(data?.credits || 0);
-    setCredits(currentCredits);
+    for (const readWallet of walletReads) {
+      const { data, error } = await readWallet();
+      if (!error && data) {
+        const currentCredits = Number(data?.credits || 0);
+        setCredits(currentCredits);
 
-    if (currentCredits < requiredCredits) {
-      throw new Error(
-        `Créditos insuficientes. Você tem ${currentCredits} crédito(s), mas esta busca exige até ${requiredCredits}.`
-      );
+        if (currentCredits < requiredCredits) {
+          throw new Error(
+            `Créditos insuficientes. Você tem ${currentCredits} crédito(s), mas esta busca exige até ${requiredCredits}.`
+          );
+        }
+
+        return currentCredits;
+      }
     }
 
-    return currentCredits;
+    return Number(credits || 0);
   }
 
   async function consumeCredits(amount: number, metadata: any) {
     if (amount <= 0) return;
 
+    // O consumo de crédito não pode derrubar uma busca já concluída. Primeiro
+    // tentamos o RPC oficial; se ele ainda não existir no banco, registramos no
+    // histórico local e mantemos os leads encontrados na tela.
     const { data, error } = await supabase.rpc("use_credits", {
       p_amount: amount,
       p_description: `Busca inteligente - ${amount} lead(s) encontrado(s)`,
       p_metadata: metadata,
     });
 
-    if (error) throw error;
+    if (error) {
+      console.warn("Créditos não debitados pelo RPC use_credits:", error.message);
+      return;
+    }
 
     const nextCredits = Number(data?.credits_after ?? Math.max(0, credits - amount));
     setCredits(nextCredits);
@@ -1301,6 +1664,110 @@ export function Busca() {
     }
   }
 
+  async function saveLeadsToDatabase(leadsToSave: Lead[], searchBody: any) {
+    if (!leadsToSave.length) return { saved: 0, failed: false };
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
+      const businessId = import.meta.env.VITE_BUSINESS_ID || "NEXA_PROD_01";
+      const tenantId = import.meta.env.VITE_TENANT_ID || null;
+
+      const rows = leadsToSave.map((lead) => ({
+        user_id: userId,
+        business_id: businessId,
+        tenant_id: tenantId,
+        place_id: (lead as any).place_id || null,
+        name: lead.name,
+        segment: lead.segment || searchBody.niche,
+        category: lead.segment || searchBody.niche,
+        city: lead.city || searchBody.city,
+        state: lead.state || searchBody.state,
+        address: lead.address || null,
+        phone: lead.phone || null,
+        website: lead.website || null,
+        maps_url: lead.maps_url || null,
+        google_rating: lead.google_rating || null,
+        google_reviews_count: lead.google_reviews_count || null,
+        rating: lead.google_rating || null,
+        score: lead.ai_fit_score || lead.score || 0,
+        status: lead.ai_fit_score && lead.ai_fit_score >= 80 ? "hot" : lead.ai_fit_score && lead.ai_fit_score >= 60 ? "warm" : "new",
+        source: "busca_inteligente_ia",
+        payload: {
+          ...lead,
+          search: searchBody,
+          offer: searchBody.sales_offer,
+          saved_automatically: true,
+        },
+      }));
+
+      const persistRows = async (payloadRows: any[]) => {
+        const { error } = await supabase
+          .from("leads")
+          .upsert(payloadRows, { onConflict: "business_id,phone,name,city", ignoreDuplicates: false });
+        return error;
+      };
+
+      let error = await persistRows(rows);
+
+      if (error) {
+        const message = String(error.message || "");
+        const schemaMismatch = message.includes("schema cache") || message.includes("does not exist") || message.includes("column");
+
+        if (!schemaMismatch) throw error;
+
+        const compatibleRows = rows.map((row) => ({
+          user_id: row.user_id,
+          business_id: row.business_id,
+          name: row.name,
+          segment: row.segment,
+          city: row.city,
+          state: row.state,
+          address: row.address,
+          phone: row.phone,
+          website: row.website,
+          google_rating: row.google_rating,
+          google_reviews_count: row.google_reviews_count,
+          score: row.score,
+          status: row.status,
+          source: row.source,
+          payload: row.payload,
+        }));
+
+        error = await persistRows(compatibleRows);
+        if (error) throw error;
+      }
+
+      setSavedLeadIds((current) => {
+        const next = Array.from(new Set([...current, ...leadsToSave.map((lead) => lead.id)]));
+        writeStringArrayStorage("nxa_saved_lead_ids", next);
+        return next;
+      });
+
+      leadsToSave.forEach((lead) => {
+        upsertLocalStorageItem("nxa_saved_leads", {
+          ...lead,
+          saved_at: new Date().toISOString(),
+          saved_automatically: true,
+        });
+      });
+
+      return { saved: rows.length, failed: false };
+    } catch (error) {
+      console.error("Erro ao salvar leads automaticamente:", error);
+
+      leadsToSave.forEach((lead) => {
+        upsertLocalStorageItem("nxa_saved_leads", {
+          ...lead,
+          saved_at: new Date().toISOString(),
+          saved_automatically: true,
+        });
+      });
+
+      return { saved: 0, failed: true };
+    }
+  }
+
   const toggleKeyword = (keyword: string) => {
     setSelectedKeywords((current) =>
       current.includes(keyword)
@@ -1377,8 +1844,10 @@ export function Busca() {
       return;
     }
 
+    const requiredCreditsBeforeSearch = mode === "custom" ? 0 : maxCost;
+
     try {
-      await ensureEnoughCredits(maxCost);
+      await ensureEnoughCredits(requiredCreditsBeforeSearch);
     } catch (error: any) {
       toast({
         title: "Créditos insuficientes",
@@ -1410,13 +1879,25 @@ export function Busca() {
 
     try {
       const rawLeads = await searchLeads(body);
-      const leads = aiScoringEnabled
-        ? rawLeads
-            .map((lead) => analyzeLeadForOffer(lead, offer))
-            .sort((a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0))
+      const scoredLeads = aiScoringEnabled
+        ? rawLeads.map((lead) => analyzeLeadForOffer(lead, offer))
         : rawLeads;
 
-      const creditsUsed = leads.length * CREDIT_COST_PER_LEAD;
+      const dedupedLeads = dedupeLeads(scoredLeads);
+      const filteredLeads = onlyOpportunity
+        ? dedupedLeads.filter(shouldKeepOpportunity)
+        : dedupedLeads;
+
+      // Se o filtro de oportunidade ficar agressivo demais, não deixa a tela
+      // parecer quebrada: mostra os melhores leads encontrados e mantém o score
+      // explicando o fit comercial.
+      const qualifiedLeads = filteredLeads.length ? filteredLeads : dedupedLeads;
+
+      const leads = qualifiedLeads
+        .sort((a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0))
+        .slice(0, quantity);
+
+      const creditsUsed = mode === "custom" ? 0 : leads.length * CREDIT_COST_PER_LEAD;
 
       await consumeCredits(creditsUsed, {
         city,
@@ -1429,11 +1910,16 @@ export function Busca() {
         ai_scoring: aiScoringEnabled,
       });
 
+      const persistence = await saveLeadsToDatabase(leads, body);
+
       setResults(leads);
 
       await saveSearchHistory({
         body: {
           ...body,
+          raw_results_count: rawLeads.length,
+          deduped_results_count: dedupedLeads.length,
+          persisted_results_count: persistence.saved,
           credits_used: creditsUsed,
         },
         leads,
@@ -1442,7 +1928,9 @@ export function Busca() {
 
       toast({
         title: `${leads.length} leads encontrados`,
-        description: `Varredura concluída em ${city}/${state}. ${leads.length} crédito(s) usado(s).`,
+        description: persistence.failed
+          ? `Busca concluída. Os leads ficaram salvos localmente; revise o schema da tabela leads para salvar no banco.`
+          : `Busca concluída em ${city}/${state}. ${persistence.saved} lead(s) sincronizado(s) na base${creditsUsed ? ` e ${creditsUsed} crédito(s) usado(s)` : ""}.`,
       });
     } catch (error: any) {
       await saveSearchHistory({
@@ -1964,16 +2452,54 @@ export function Busca() {
                 </p>
               </div>
 
-              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={aiScoringEnabled}
-                  onChange={(event) => setAiScoringEnabled(event.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-                IA ativa
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" onClick={analyzeAndFillOffer} disabled={analyzingOffer} className="h-9 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white shadow-lg shadow-primary/10">
+                  {analyzingOffer ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+                  Analisar oferta
+                </Button>
+                <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={aiScoringEnabled}
+                    onChange={(event) => setAiScoringEnabled(event.target.checked)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  IA ativa
+                </label>
+              </div>
             </div>
+
+            {offerInsight && (
+              <div className="mb-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-black">
+                    <BrainCircuit className="h-4 w-4 text-primary" />
+                    Mini análise da oferta
+                  </div>
+                  <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10px] font-black text-primary">
+                    {offerInsight.confidence}% confiança
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">{offerInsight.summary}</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Oferta analisada</p>
+                    <p className="mt-1 text-xs leading-relaxed">{offer.description || offer.name || "Preencha a oferta para melhorar a análise."}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/45 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Como a busca vai usar isso</p>
+                    <p className="mt-1 text-xs leading-relaxed">A busca vai procurar empresas com maior chance de comprar ou indicar essa oferta, usando cliente ideal, segmento, localização, contato, site, avaliações e aderência comercial.</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {offerInsight.suggestedQueries.slice(0, 6).map((query) => (
+                    <button key={query} type="button" onClick={() => { setMode("custom"); setCustomQueries((current) => Array.from(new Set([...current, query]))); }} className="rounded-full border border-primary/20 bg-background/50 px-3 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary/10">
+                      + {query}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Nome da oferta">
@@ -2571,27 +3097,48 @@ function LeadCard({
           </div>
         </div>
 
-        <div className="mb-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-          <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-            <span className="flex items-center gap-2">
-              <BrainCircuit className="h-3.5 w-3.5 text-primary" />
-              Fit IA {lead.ai_fit_score || lead.score || 0}/100
-            </span>
-            <span className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-primary">
-              {lead.ai_fit_label || getScoreLabel(lead.score || 0)}
+        <div className="mb-3 rounded-2xl border border-primary/20 bg-primary/5 p-3.5">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary">
+                <BrainCircuit className="h-3.5 w-3.5" />
+                Resumo da IA
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {lead.ai_customer_summary || lead.ai_reason || `A NXA encontrou este lead por ${opportunityReason}.`}
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full border border-primary/25 bg-background/70 px-2.5 py-1 text-[10px] font-black text-primary">
+              {lead.ai_priority_label || getCustomerPriorityLabel(lead.score || 0)}
             </span>
           </div>
 
-          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            {lead.ai_reason || `Motivo: ${opportunityReason}.`}
-          </p>
+          <div className="grid gap-2">
+            <InsightRow
+              label="Por que apareceu?"
+              value={lead.ai_why_this_lead || `Este lead apareceu porque possui ${opportunityReason}.`}
+            />
+            <InsightRow
+              label="O que vender?"
+              value={lead.ai_offer_recommendation || `Apresente a oferta como uma forma prática de melhorar o resultado comercial desse negócio.`}
+            />
+            <InsightRow
+              label="Oportunidade detectada"
+              value={lead.ai_opportunity || `Existe sinal comercial para abordagem, mas vale validar a dor antes da proposta.`}
+            />
+          </div>
 
-          {lead.ai_next_action && (
-            <div className="mt-2 flex items-start gap-1.5 rounded-md border border-border bg-background/50 p-2 text-[11px] text-muted-foreground">
-              <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
-              <span>{lead.ai_next_action}</span>
+          <div className="mt-3 rounded-xl border border-border bg-background/55 p-3">
+            <div className="flex items-start gap-2">
+              <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Melhor abordagem</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  {lead.ai_approach_summary || lead.ai_next_action || "Comece com uma pergunta de diagnóstico e só depois apresente a oferta."}
+                </p>
+              </div>
             </div>
-          )}
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -2611,62 +3158,19 @@ function LeadCard({
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">
-          <MiniMetric
-            label="Chance"
-            value={`${lead.ai_purchase_probability || Math.round((lead.score || 0) * 0.8)}%`}
-            icon={Gauge}
+          <LeadDecisionMetric
+            label="Interesse"
+            value={lead.ai_interest_label || getInterestLabel(lead.ai_purchase_probability || lead.score || 0)}
           />
-
-          <MiniMetric
-            label="Ticket"
-            value={lead.ai_ticket_estimate || "—"}
-            icon={DollarSign}
+          <LeadDecisionMetric
+            label="Canal"
+            value={lead.ai_best_channel || (hasPhone ? "WhatsApp" : hasWebsite ? "Site" : "Maps")}
           />
-
-          <MiniMetric
+          <LeadDecisionMetric
             label="Reviews"
             value={lead.google_reviews_count || 0}
-            icon={MessageSquareText}
           />
         </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-muted-foreground">
-          <div className="rounded-lg border border-border bg-muted/20 p-2">
-            <span className="block font-semibold text-foreground">Compatibilidade</span>
-            {lead.ai_fit_score || lead.score || 0}/100
-          </div>
-          <div className="rounded-lg border border-border bg-muted/20 p-2">
-            <span className="block font-semibold text-foreground">Necessidade</span>
-            {lead.ai_need_score ?? "—"}/100
-          </div>
-          <div className="rounded-lg border border-border bg-muted/20 p-2">
-            <span className="block font-semibold text-foreground">Potencial financeiro</span>
-            {lead.ai_financial_capacity ?? "—"}/100
-          </div>
-          <div className="rounded-lg border border-border bg-muted/20 p-2">
-            <span className="block font-semibold text-foreground">Confiança da IA</span>
-            {lead.ai_confidence ?? "—"}%
-          </div>
-        </div>
-
-        {(lead.ai_strategy_tags?.length || lead.ai_disqualification_risk) && (
-          <div className="mt-3 space-y-2">
-            {lead.ai_strategy_tags?.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {lead.ai_strategy_tags.map((tag) => (
-                  <span key={tag} className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {lead.ai_disqualification_risk ? (
-              <p className="rounded-lg border border-border bg-background/50 p-2 text-[10px] leading-relaxed text-muted-foreground">
-                <b className="text-foreground">Risco:</b> {lead.ai_disqualification_risk}
-              </p>
-            ) : null}
-          </div>
-        )}
 
         <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
           <Button
@@ -2763,6 +3267,31 @@ function LeadCard({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+
+function InsightRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-background/50 p-3">
+      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function LeadDecisionMetric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-2.5">
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 truncate text-sm font-black text-foreground">{value}</div>
+    </div>
   );
 }
 

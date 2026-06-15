@@ -51,6 +51,201 @@ function getBusinessId() {
   }
 }
 
+
+type DashboardVisualTheme = "neon" | "mono-dark" | "mono-light";
+
+const DASHBOARD_THEMES: Record<DashboardVisualTheme, React.CSSProperties> = {
+  neon: {
+    "--background": "222 47% 4%",
+    "--foreground": "210 40% 98%",
+    "--card": "222 47% 7%",
+    "--card-foreground": "210 40% 98%",
+    "--popover": "222 47% 6%",
+    "--popover-foreground": "210 40% 98%",
+    "--primary": "180 100% 50%",
+    "--primary-foreground": "222 47% 4%",
+    "--secondary": "217 33% 12%",
+    "--secondary-foreground": "210 40% 98%",
+    "--muted": "217 33% 13%",
+    "--muted-foreground": "215 20% 68%",
+    "--accent": "180 100% 50%",
+    "--accent-foreground": "222 47% 4%",
+    "--border": "184 70% 18%",
+    "--input": "184 70% 18%",
+    "--ring": "180 100% 50%",
+    "--card-border": "184 70% 18%",
+  } as React.CSSProperties,
+  "mono-dark": {
+    "--background": "0 0% 3%",
+    "--foreground": "0 0% 98%",
+    "--card": "0 0% 7%",
+    "--card-foreground": "0 0% 98%",
+    "--popover": "0 0% 6%",
+    "--popover-foreground": "0 0% 98%",
+    "--primary": "0 0% 100%",
+    "--primary-foreground": "0 0% 4%",
+    "--secondary": "0 0% 11%",
+    "--secondary-foreground": "0 0% 98%",
+    "--muted": "0 0% 12%",
+    "--muted-foreground": "0 0% 64%",
+    "--accent": "0 0% 100%",
+    "--accent-foreground": "0 0% 4%",
+    "--border": "0 0% 18%",
+    "--input": "0 0% 18%",
+    "--ring": "0 0% 100%",
+    "--card-border": "0 0% 18%",
+  } as React.CSSProperties,
+  "mono-light": {
+    "--background": "210 28% 91%",
+    "--foreground": "222 47% 7%",
+    "--card": "210 32% 96%",
+    "--card-foreground": "222 47% 7%",
+    "--popover": "210 32% 97%",
+    "--popover-foreground": "222 47% 7%",
+    "--primary": "190 92% 34%",
+    "--primary-foreground": "210 40% 98%",
+    "--secondary": "212 24% 88%",
+    "--secondary-foreground": "222 47% 10%",
+    "--muted": "213 22% 87%",
+    "--muted-foreground": "216 18% 34%",
+    "--accent": "263 76% 54%",
+    "--accent-foreground": "210 40% 98%",
+    "--border": "214 20% 76%",
+    "--input": "214 20% 76%",
+    "--ring": "190 92% 34%",
+    "--card-border": "214 20% 76%",
+  } as React.CSSProperties,
+};
+
+function normalizeTheme(value: string | null): DashboardVisualTheme | null {
+  if (!value) return null;
+  const theme = value.toLowerCase();
+  if (["neon", "cyber", "default"].includes(theme)) return "neon";
+  if (["black", "dark", "mono-dark", "preto"].includes(theme)) return "mono-dark";
+  if (["white", "light", "mono-light", "branco"].includes(theme)) return "mono-light";
+  return null;
+}
+
+function getStoredDashboardTheme(): DashboardVisualTheme {
+  try {
+    return (
+      normalizeTheme(localStorage.getItem("nxa-theme")) ||
+      normalizeTheme(localStorage.getItem("nxa_app_theme")) ||
+      normalizeTheme(localStorage.getItem("nxa_theme")) ||
+      normalizeTheme(localStorage.getItem("nxa_visual_theme")) ||
+      normalizeTheme(localStorage.getItem("nxa_dashboard_visual_theme")) ||
+      "neon"
+    );
+  } catch {
+    return "neon";
+  }
+}
+
+function DashboardThemeStyle() {
+  return (
+    <style>{`
+      .nxa-dashboard-shell {
+        position: relative;
+        min-height: calc(100vh - 2rem);
+        border-radius: 1.25rem;
+        padding: 1rem;
+        color: hsl(var(--foreground));
+        transition: background 260ms ease, color 220ms ease, border-color 220ms ease;
+      }
+
+      .nxa-theme-neon {
+        background:
+          radial-gradient(circle at 10% 0%, rgba(6,182,212,0.12), transparent 30%),
+          radial-gradient(circle at 90% 0%, rgba(124,58,237,0.12), transparent 32%),
+          linear-gradient(180deg, #06111f 0%, #071421 48%, #08101c 100%);
+      }
+
+      .nxa-theme-mono-dark {
+        background:
+          radial-gradient(circle at 15% 0%, rgba(6,182,212,0.08), transparent 28%),
+          linear-gradient(180deg, #080b10 0%, #0b0f17 100%);
+      }
+
+      .nxa-theme-mono-light {
+        background:
+          radial-gradient(circle at 10% 0%, rgba(6,182,212,0.16), transparent 32%),
+          radial-gradient(circle at 88% 0%, rgba(124,58,237,0.10), transparent 34%),
+          linear-gradient(180deg, #eef5f8 0%, #e8f1f5 55%, #edf4f7 100%);
+      }
+
+      .nxa-dashboard-shell .nxa-soft-card,
+      .nxa-dashboard-shell .nxa-hero-panel,
+      .nxa-dashboard-shell .nxa-intelligence-card {
+        border: 1px solid hsl(var(--border) / 0.9);
+        background: hsl(var(--card) / 0.66);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 12px 34px rgba(2, 6, 23, 0.10);
+      }
+
+      .nxa-theme-mono-light .nxa-soft-card,
+      .nxa-theme-mono-light .nxa-hero-panel,
+      .nxa-theme-mono-light .nxa-intelligence-card,
+      .nxa-theme-mono-light .bg-card\\/55 {
+        background: rgba(248, 252, 253, 0.78) !important;
+        border-color: rgba(15, 23, 42, 0.10) !important;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+      }
+
+      .nxa-theme-mono-light .bg-background\\/40,
+      .nxa-theme-mono-light .bg-background\\/45,
+      .nxa-theme-mono-light .bg-background\\/50,
+      .nxa-theme-mono-light .bg-background\\/60 {
+        background: rgba(255, 255, 255, 0.56) !important;
+        border-color: rgba(15, 23, 42, 0.10) !important;
+      }
+
+      .nxa-theme-mono-light .text-white,
+      .nxa-theme-mono-light .text-slate-50 {
+        color: #07111f !important;
+      }
+
+      .nxa-theme-mono-light .text-muted-foreground {
+        color: #526374 !important;
+      }
+
+      .nxa-theme-mono-light .text-cyan-300,
+      .nxa-theme-mono-light .text-cyan-400 { color: #0891b2 !important; }
+      .nxa-theme-mono-light .text-emerald-300 { color: #059669 !important; }
+      .nxa-theme-mono-light .text-blue-300 { color: #2563eb !important; }
+      .nxa-theme-mono-light .text-orange-300 { color: #d97706 !important; }
+      .nxa-theme-mono-light .text-red-300 { color: #dc2626 !important; }
+      .nxa-theme-mono-light .text-purple-300 { color: #7c3aed !important; }
+
+      .nxa-dashboard-shell .border-card-border,
+      .nxa-dashboard-shell .rounded-3xl,
+      .nxa-dashboard-shell .rounded-2xl {
+        transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+      }
+
+      .nxa-dashboard-shell .border-card-border:hover,
+      .nxa-dashboard-shell .nxa-hover:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 36px hsl(var(--primary) / 0.10);
+      }
+
+      .nxa-dashboard-shell button,
+      .nxa-dashboard-shell a button {
+        transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+      }
+
+      .nxa-dashboard-shell button:hover,
+      .nxa-dashboard-shell a button:hover {
+        transform: translateY(-1px);
+      }
+
+      .nxa-dashboard-shell .nxa-hardware-line {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.38), transparent);
+      }
+    `}</style>
+  );
+}
+
 function toArray(value: any): any[] {
   if (Array.isArray(value)) return value;
   if (Array.isArray(value?.data)) return value.data;
@@ -397,7 +592,7 @@ function generateLocalCopilotInsight(ctx: any) {
 
 function CopilotIntelligenceCard({ insight, loading, bestLead }: { insight: any; loading: boolean; bestLead: any }) {
   return (
-    <Card className="bg-[radial-gradient(circle_at_top_right,rgba(0,255,255,0.12),transparent_35%),linear-gradient(135deg,rgba(2,6,23,0.72),rgba(15,23,42,0.58))] border-primary/20 overflow-hidden">
+    <Card className="nxa-intelligence-card bg-[radial-gradient(circle_at_top_right,rgba(0,255,255,0.12),transparent_35%),linear-gradient(135deg,rgba(2,6,23,0.72),rgba(15,23,42,0.58))] border-primary/20 overflow-hidden">
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 min-w-0">
@@ -507,82 +702,117 @@ function CopilotPanel({ bestLead, hotLeads, overdueFollowups, expectedMRR, bestS
   const bestLeadHref = bestLeadId ? `/lead-profile/${bestLeadId}` : "/leads";
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-primary/20 bg-[radial-gradient(circle_at_top_left,rgba(0,255,255,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.16),transparent_38%),linear-gradient(135deg,rgba(2,6,23,0.86),rgba(15,23,42,0.68))] p-6 lg:p-8 shadow-[0_0_120px_rgba(0,255,255,0.10)]">
-      <div className="absolute -top-28 -right-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
-      <div className="absolute -bottom-32 -left-28 h-72 w-72 rounded-full bg-purple-500/10 blur-3xl" />
-      <div className="relative grid gap-8 xl:grid-cols-[1.35fr_0.65fr] items-stretch">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap mb-5">
-            <Badge className="bg-primary/10 text-primary border-primary/20"><Bot className="h-3.5 w-3.5 mr-1" />NXA Copilot</Badge>
-            <Badge variant="outline">Command Center</Badge>
-            <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20"><ShieldCheck className="h-3.5 w-3.5 mr-1" />Operação guiada</Badge>
-          </div>
-          <h1 className="text-4xl lg:text-6xl font-black tracking-tight leading-[0.95]">
-            Sua próxima venda começa aqui.
-          </h1>
-          <p className="text-muted-foreground mt-4 text-base lg:text-lg max-w-3xl leading-relaxed">
-            O Copilot analisou sua carteira, priorizou oportunidades e calculou onde existe maior chance de gerar receita hoje.
-          </p>
+    <Card className="nxa-hero-panel overflow-hidden rounded-3xl">
+      <CardContent className="p-5 lg:p-6">
+        <div className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr] items-stretch">
+          <div className="space-y-5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-500/20">
+                <Bot className="h-3.5 w-3.5 mr-1" /> NXA Copilot
+              </Badge>
+              <Badge variant="outline">Command Center</Badge>
+              <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20">
+                <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Operação guiada
+              </Badge>
+            </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mt-6">
-            <div className="rounded-3xl border border-orange-500/20 bg-background/45 p-4">
-              <p className="text-xs text-muted-foreground">Oportunidades quentes</p>
-              <p className="text-3xl font-black text-orange-300 mt-1">{hotLeads}</p>
+            <div>
+              <h1 className="text-3xl lg:text-4xl font-black tracking-tight leading-tight">
+                Sua próxima venda <span className="bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">começa aqui.</span>
+              </h1>
+              <p className="text-muted-foreground mt-3 text-sm lg:text-base max-w-3xl leading-relaxed">
+                O Copilot organiza sua carteira, prioriza oportunidades e mostra onde existe maior chance de gerar receita hoje.
+              </p>
             </div>
-            <div className="rounded-3xl border border-emerald-500/20 bg-background/45 p-4">
-              <p className="text-xs text-muted-foreground">MRR esperado</p>
-              <p className="text-3xl font-black text-emerald-300 mt-1">{moneyFormat(expectedMRR)}</p>
-            </div>
-            <div className="rounded-3xl border border-primary/20 bg-background/45 p-4">
-              <p className="text-xs text-muted-foreground">Nicho mais forte</p>
-              <p className="text-lg font-black text-primary mt-2 truncate">{bestSegment}</p>
-            </div>
-            <div className="rounded-3xl border border-blue-500/20 bg-background/45 p-4">
-              <p className="text-xs text-muted-foreground">Praça prioritária</p>
-              <p className="text-lg font-black text-blue-300 mt-2 truncate">{bestCity}</p>
-            </div>
-          </div>
 
-          <div className="mt-6 rounded-3xl border border-primary/15 bg-background/45 p-5">
-            <div className="flex items-start gap-4">
-              <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shrink-0"><Zap className="h-5 w-5" /></div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Próxima melhor ação</p>
-                <p className="font-black text-xl mt-1">{bestAction}</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {bestLead ? `${getLeadName(bestLead)} aparece como melhor oportunidade por score, dados de contato e sinal comercial.` : "Execute uma busca inteligente para o Copilot escolher o melhor lead automaticamente."}
-                </p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="nxa-hover rounded-2xl border border-orange-500/20 bg-background/45 p-4">
+                <p className="text-xs text-muted-foreground">Oportunidades quentes</p>
+                <p className="text-2xl font-black text-orange-300 mt-1">{hotLeads}</p>
               </div>
+              <div className="nxa-hover rounded-2xl border border-emerald-500/20 bg-background/45 p-4">
+                <p className="text-xs text-muted-foreground">MRR esperado</p>
+                <p className="text-2xl font-black text-emerald-300 mt-1">{moneyFormat(expectedMRR)}</p>
+              </div>
+              <div className="nxa-hover rounded-2xl border border-cyan-500/20 bg-background/45 p-4">
+                <p className="text-xs text-muted-foreground">Nicho mais forte</p>
+                <p className="text-base font-black text-cyan-300 mt-2 truncate">{bestSegment}</p>
+              </div>
+              <div className="nxa-hover rounded-2xl border border-blue-500/20 bg-background/45 p-4">
+                <p className="text-xs text-muted-foreground">Praça prioritária</p>
+                <p className="text-base font-black text-blue-300 mt-2 truncate">{bestCity}</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-cyan-500/20 bg-background/45 p-4">
+              <div className="flex items-start gap-3">
+                <div className="h-10 w-10 rounded-xl bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 flex items-center justify-center shrink-0">
+                  <Zap className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.20em] text-muted-foreground">Próxima melhor ação</p>
+                  <p className="font-black text-base lg:text-lg mt-1">{bestAction}</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {bestLead ? `${getLeadName(bestLead)} aparece como melhor oportunidade por score, dados de contato e sinal comercial.` : "Execute uma busca inteligente para o Copilot escolher o melhor lead automaticamente."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-background/50 p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Lead recomendado agora</p>
+                  <p className="font-black text-lg mt-1 truncate">{bestLead ? getLeadName(bestLead) : "Sem lead ainda"}</p>
+                </div>
+                <div className="h-12 w-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-300 flex items-center justify-center font-black">
+                  {bestLead ? getScore(bestLead) : "—"}
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="rounded-xl border border-border bg-background/40 p-3 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Local</span>
+                  <strong className="text-sm">{bestLead ? `${getLeadCity(bestLead)} / ${getLeadState(bestLead)}` : "—"}</strong>
+                </div>
+                <div className="rounded-xl border border-border bg-background/40 p-3 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Segmento</span>
+                  <strong className="text-sm truncate max-w-[150px]">{bestLead ? getLeadSegment(bestLead) : "—"}</strong>
+                </div>
+                <div className="rounded-xl border border-border bg-background/40 p-3 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Follow-ups críticos</span>
+                  <strong className={overdueFollowups > 0 ? "text-red-300" : "text-emerald-300"}>{overdueFollowups}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2">
+              <Link href={bestLead ? bestLeadHref : "/busca"}>
+                <Button
+                  className="w-full h-9 bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-sm"
+                  onClick={() => {
+                    try {
+                      if (bestLead) localStorage.setItem("nxa_dashboard_selected_lead", JSON.stringify(bestLead));
+                    } catch {}
+                  }}
+                >
+                  {bestLead ? "Abrir oportunidade" : "Criar primeira busca"}
+                  <ArrowUpRight className="h-4 w-4 ml-2" />
+                </Button>
+              </Link>
+              <Link href="/leads">
+                <Button variant="outline" className="w-full h-9 bg-background/50">Central de oportunidades</Button>
+              </Link>
             </div>
           </div>
         </div>
-
-        <div className="rounded-[1.7rem] border border-border bg-background/50 backdrop-blur-xl p-5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Lead recomendado agora</p>
-                <p className="font-black text-xl mt-1 truncate">{bestLead ? getLeadName(bestLead) : "Sem lead ainda"}</p>
-              </div>
-              <div className="h-14 w-14 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-300 flex items-center justify-center font-black">
-                {bestLead ? getScore(bestLead) : "—"}
-              </div>
-            </div>
-            <div className="mt-5 space-y-3">
-              <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center justify-between"><span className="text-sm text-muted-foreground">Local</span><strong>{bestLead ? `${getLeadCity(bestLead)} / ${getLeadState(bestLead)}` : "—"}</strong></div>
-              <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center justify-between"><span className="text-sm text-muted-foreground">Segmento</span><strong className="truncate max-w-[160px]">{bestLead ? getLeadSegment(bestLead) : "—"}</strong></div>
-              <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center justify-between"><span className="text-sm text-muted-foreground">Follow-ups críticos</span><strong className={overdueFollowups > 0 ? "text-red-300" : "text-emerald-300"}>{overdueFollowups}</strong></div>
-            </div>
-          </div>
-          <div className="mt-5 grid gap-2">
-            <Link href={bestLead ? "/leads" : "/busca"}><Button className="w-full" onClick={() => { try { if (bestLead) localStorage.setItem("nxa_dashboard_selected_lead", JSON.stringify(bestLead)); } catch {} }}>{bestLead ? "Abrir oportunidade" : "Criar primeira busca"}<ArrowUpRight className="h-4 w-4 ml-2" /></Button></Link>
-            <Link href="/leads"><Button variant="outline" className="w-full bg-background/50">Central de oportunidades</Button></Link>
-          </div>
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
+
 
 export function Dashboard() {
   const [, navigate] = useLocation();
@@ -605,6 +835,18 @@ export function Dashboard() {
   });
   const [aiInsight, setAiInsight] = React.useState<any>(() => generateLocalCopilotInsight({ totalLeads: 0 }));
   const [aiLoading, setAiLoading] = React.useState(false);
+  const [visualTheme, setVisualTheme] = React.useState<DashboardVisualTheme>(() => getStoredDashboardTheme());
+
+  React.useEffect(() => {
+    const syncTheme = () => setVisualTheme(getStoredDashboardTheme());
+    syncTheme();
+    window.addEventListener("storage", syncTheme);
+    window.addEventListener("nxa-theme-change", syncTheme as EventListener);
+    return () => {
+      window.removeEventListener("storage", syncTheme);
+      window.removeEventListener("nxa-theme-change", syncTheme as EventListener);
+    };
+  }, []);
 
   const togglePanel = React.useCallback((id: string) => {
     setExpandedPanels((current) => ({ ...current, [id]: !current[id] }));
@@ -939,7 +1181,9 @@ export function Dashboard() {
   ];
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className={`nxa-dashboard-shell nxa-theme-${visualTheme} space-y-6 pb-10`} style={DASHBOARD_THEMES[visualTheme]}>
+      <DashboardThemeStyle />
+      <div className="nxa-hardware-line" />
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <p className="text-sm text-muted-foreground">NXA Growth Engine</p>
@@ -951,7 +1195,7 @@ export function Dashboard() {
           <Button onClick={loadDashboardData} disabled={loading} variant="outline" className="bg-background/50">
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Atualizar
           </Button>
-          <Link href="/busca"><Button>Nova busca IA<Search className="h-4 w-4 ml-2" /></Button></Link>
+          <Link href="/busca"><Button className="bg-gradient-to-r from-cyan-600 to-violet-600 text-white shadow-[0_14px_34px_rgba(8,145,178,0.24)] hover:scale-[1.02] transition-transform">Nova busca IA<Search className="h-4 w-4 ml-2" /></Button></Link>
         </div>
       </div>
 

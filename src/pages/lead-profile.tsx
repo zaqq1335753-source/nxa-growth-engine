@@ -63,7 +63,9 @@ type SalesOffer = {
   description?: string;
   price?: string | number;
   ideal_customer?: string;
+  idealCustomer?: string;
   pain_points?: string;
+  painPoints?: string;
   differentials?: string;
   objections?: string;
   target_segments?: string;
@@ -379,6 +381,76 @@ function getAnalysisConfidence(signals: boolean[]) {
   return clampScore(Math.round((available / Math.max(signals.length, 1)) * 100));
 }
 
+function normalizeOffer(raw: any): SalesOffer | null {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    ...raw,
+    name: raw.name || raw.offer_name || raw.product_name || "",
+    description: raw.description || raw.offerSummary || raw.summary || "",
+    price: raw.price || raw.ticket || raw.amount || "",
+    ideal_customer: raw.ideal_customer || raw.idealCustomer || "",
+    pain_points: raw.pain_points || raw.painPoints || "",
+    differentials: raw.differentials || raw.differentials_text || "",
+    objections: raw.objections || "",
+    target_segments: raw.target_segments || raw.idealCustomer || raw.ideal_customer || "",
+  };
+}
+
+function getPublicIdentityLevel(params: { hasSite: boolean; hasInstagram: boolean; hasWhatsapp: boolean; hasOnlineScheduling: boolean; hasPixel: boolean; hasAnalytics: boolean; reviewsCount: number }) {
+  const { hasSite, hasInstagram, hasWhatsapp, hasOnlineScheduling, hasPixel, hasAnalytics, reviewsCount } = params;
+  const points = (hasSite ? 22 : 0) + (hasInstagram ? 16 : 0) + (hasWhatsapp ? 18 : 0) + (hasOnlineScheduling ? 14 : 0) + ((hasPixel || hasAnalytics) ? 14 : 0) + (reviewsCount >= 50 ? 16 : reviewsCount >= 10 ? 10 : reviewsCount > 0 ? 6 : 0);
+  const score = clampScore(points);
+  if (score >= 78) return { label: "Identidade digital forte", score, tone: "emerald" as const, description: "O lead já tem presença pública suficiente para uma abordagem bem personalizada." };
+  if (score >= 52) return { label: "Identidade digital em construção", score, tone: "cyan" as const, description: "Existem sinais úteis, mas ainda há lacunas para explorar como oportunidade comercial." };
+  return { label: "Identidade digital fraca", score, tone: "orange" as const, description: "Poucos ativos públicos foram encontrados. A abordagem deve começar por diagnóstico e validação." };
+}
+
+function getCommercialPersona(params: { leadName: string; category: string; activeOffer?: SalesOffer | null; hasWhatsapp: boolean; hasSite: boolean; hasInstagram: boolean; hasOnlineScheduling: boolean; reviewsCount: number; score: number }) {
+  const { leadName, category, activeOffer, hasWhatsapp, hasSite, hasInstagram, hasOnlineScheduling, reviewsCount, score } = params;
+  const categoryText = category || "negócio local";
+  const offerName = activeOffer?.name || "a oferta cadastrada";
+  const hasOffer = Boolean(activeOffer?.name || activeOffer?.description);
+  const demandSignal = reviewsCount >= 50 ? "alto movimento público" : reviewsCount >= 10 ? "demanda validada por avaliações" : "demanda ainda pouco visível publicamente";
+  const operationSignal = hasOnlineScheduling ? "já possui alguma estrutura de agendamento" : "parece depender de atendimento manual ou processo não visível";
+  const channelSignal = hasWhatsapp ? "canal direto encontrado" : "canal direto ainda precisa ser validado";
+  const digitalGap = !hasSite ? "site ausente ou não identificado" : !hasInstagram ? "presença social incompleta" : !hasOnlineScheduling ? "agendamento online não identificado" : "presença digital razoavelmente estruturada";
+
+  const opportunity = hasOffer
+    ? `A melhor oportunidade é conectar ${offerName} com o contexto de ${categoryText}: ${demandSignal}, ${operationSignal} e ${channelSignal}.`
+    : `O lead tem sinais comerciais, mas a análise ainda fica limitada porque nenhuma oferta ativa foi encontrada no perfil. Cadastre a oferta para a IA dizer exatamente o que vender e por quê.`;
+
+  const approach = score >= 70
+    ? `Abordar ${leadName} com mensagem consultiva curta, citando um sinal observável e oferecendo diagnóstico rápido antes de falar preço.`
+    : `Iniciar com pergunta de qualificação para entender volume de contatos, canal principal e urgência antes de apresentar proposta.`;
+
+  const warning = !hasWhatsapp
+    ? "Prioridade: encontrar WhatsApp ou decisor antes de gastar tempo comercial."
+    : !hasOffer
+      ? "Prioridade: cadastrar a oferta para tornar a análise Produto x Lead precisa."
+      : score < 52
+        ? "Prioridade: não vender direto; validar dor, orçamento e timing."
+        : "Prioridade: avançar com abordagem personalizada e follow-up curto.";
+
+  return { demandSignal, operationSignal, channelSignal, digitalGap, opportunity, approach, warning };
+}
+
+function SignalTile({ label, value, description, tone = "cyan" }: { label: string; value: string; description?: string; tone?: "cyan" | "emerald" | "orange" | "pink" | "slate" }) {
+  const tones = {
+    cyan: "border-cyan-400/20 bg-cyan-400/[0.08] text-cyan-100",
+    emerald: "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-100",
+    orange: "border-orange-400/20 bg-orange-400/[0.08] text-orange-100",
+    pink: "border-pink-400/20 bg-pink-400/[0.08] text-pink-100",
+    slate: "border-white/10 bg-white/[0.035] text-slate-100",
+  };
+  return (
+    <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">{label}</p>
+      <p className="mt-2 text-lg font-black text-white">{value}</p>
+      {description ? <p className="mt-1 text-xs leading-relaxed text-slate-400">{description}</p> : null}
+    </div>
+  );
+}
+
 
 function normalizeText(value: any) {
   return String(value || "")
@@ -399,7 +471,14 @@ function keywordScore(text: string, groups: string[][]) {
 
 function getOfferText(offer?: SalesOffer | null) {
   if (!offer) return "";
-  return [offer.name, offer.description, offer.ideal_customer, offer.pain_points, offer.differentials, offer.target_segments]
+  return [
+    offer.name,
+    offer.description,
+    offer.ideal_customer || offer.idealCustomer,
+    offer.pain_points || offer.painPoints,
+    offer.differentials,
+    offer.target_segments,
+  ]
     .filter(Boolean)
     .join(" ");
 }
@@ -560,17 +639,22 @@ export function LeadProfile() {
   }
 
   async function loadOffer(_uid: string) {
-    // Mantido sem consulta ao Supabase porque a tabela sales_offers ainda não existe no banco atual.
-    // Isso evita 404 no console e mantém o perfil funcionando normalmente.
-    const localOffer = localStorage.getItem("nxa_active_sales_offer");
+    // A Busca Inteligente salva a oferta em nxa_sales_offer_v2. Mantemos também
+    // compatibilidade com nxa_active_sales_offer para não quebrar versões antigas.
+    const storageKeys = ["nxa_sales_offer_v2", "nxa_active_sales_offer"];
 
-    if (localOffer) {
+    for (const key of storageKeys) {
+      const localOffer = localStorage.getItem(key);
+      if (!localOffer) continue;
+
       try {
-        const parsed = JSON.parse(localOffer) as SalesOffer;
-        setOffer(parsed);
-        return parsed;
+        const parsed = normalizeOffer(JSON.parse(localOffer));
+        if (parsed?.name || parsed?.description) {
+          setOffer(parsed);
+          return parsed;
+        }
       } catch {
-        localStorage.removeItem("nxa_active_sales_offer");
+        localStorage.removeItem(key);
       }
     }
 
@@ -876,6 +960,16 @@ export function LeadProfile() {
   const recommendation = getExecutiveRecommendation(score);
   const nextAction = intelligence?.ai_next_action || intelligence?.next_action || intelligence?.recommended_followup || (recommendation.label === "Prospectar agora" ? "Enviar abordagem personalizada pelo WhatsApp e propor uma demonstração rápida com foco em ganho de tempo, captação e follow-up." : "Realizar primeiro contato consultivo e validar a dor principal.");
   const reason = intelligence?.ai_reason || intelligence?.ai_fit || intelligence?.ai_summary || `Diagnóstico provisório: ${leadName} possui score ${score}/100, fit ${fitScore || score}/100 e sinais digitais que indicam ${potential.toLowerCase()} potencial. Cadastre ou atualize sua oferta para a IA refinar a análise Produto x Lead.`;
+  const identityLevel = getPublicIdentityLevel({ hasSite, hasInstagram, hasWhatsapp, hasOnlineScheduling, hasPixel, hasAnalytics, reviewsCount });
+  const commercialPersona = getCommercialPersona({ leadName, category: leadCategory, activeOffer, hasWhatsapp, hasSite, hasInstagram, hasOnlineScheduling, reviewsCount, score: commercialScore });
+  const recommendedOfferText = activeOffer?.name || "Oferta ainda não cadastrada";
+  const digitalAssets = [
+    hasSite ? "Site encontrado" : "Site não identificado",
+    hasWhatsapp ? "WhatsApp/telefone encontrado" : "WhatsApp não validado",
+    hasInstagram ? "Instagram identificado" : "Instagram não identificado",
+    hasOnlineScheduling ? "Agendamento online detectado" : "Agendamento online ausente",
+    hasPixel || hasAnalytics ? "Medição digital detectada" : "Medição digital não detectada",
+  ];
 
   return (
     <div className="relative space-y-6 pb-28">
@@ -959,54 +1053,61 @@ export function LeadProfile() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-violet-400/15 bg-[#070b12]/80 p-5 shadow-[0_0_70px_rgba(139,92,246,0.08)] backdrop-blur-xl">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <div className="rounded-3xl border border-cyan-400/15 bg-[#060b16]/90 p-5 shadow-[0_0_90px_rgba(34,211,238,0.08)] backdrop-blur-xl">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-violet-300"><Brain className="h-4 w-4" /> Motor Produto x Lead</p>
-            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Análise real da oferta contra este lead</h2>
-            <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-400">A IA cruza a oferta cadastrada, segmento, sinais digitais, contato, avaliações e maturidade pública para explicar por que este lead merece prioridade ou deve ser nutrido.</p>
+            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-300"><Brain className="h-4 w-4" /> Perfil comercial + identidade na internet</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">O que realmente importa sobre este lead</h2>
+            <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-400">
+              A NXA cruza dados públicos, presença digital, contato, avaliações, segmento e oferta cadastrada para explicar se vale abordar, como abordar e qual oportunidade existe.
+            </p>
           </div>
-          <div className="rounded-2xl border border-violet-400/20 bg-violet-400/10 px-5 py-4 text-right">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Score comercial</p>
-            <p className="text-4xl font-black text-white">{commercialScore}</p>
-            <p className="text-xs font-bold text-violet-200">{offerFit.qualificationLevel}</p>
+          <div className={`rounded-2xl border px-5 py-4 text-right ${identityLevel.tone === "emerald" ? "border-emerald-400/20 bg-emerald-400/10" : identityLevel.tone === "cyan" ? "border-cyan-400/20 bg-cyan-400/10" : "border-orange-400/20 bg-orange-400/10"}`}>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Identidade digital</p>
+            <p className="mt-1 text-2xl font-black text-white">{identityLevel.label}</p>
+            <p className="text-xs font-bold text-slate-300">{identityLevel.score}/100 de presença pública</p>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Compatibilidade</span><span className="text-cyan-200">{offerFit.compatibility}%</span></div>
-              <ProgressBar value={offerFit.compatibility} tone="cyan" />
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="space-y-4">
+            <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.06] p-5">
+              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-300"><Target className="h-4 w-4" /> Oportunidade detectada</p>
+              <h3 className="mt-2 text-2xl font-black text-white">{commercialScore >= 70 ? "Vale abordagem comercial" : commercialScore >= 52 ? "Vale qualificação" : "Manter em nutrição"}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-slate-300">{commercialPersona.opportunity}</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <SignalTile label="Oferta recomendada" value={recommendedOfferText} description={activeOffer?.description || "Cadastre uma oferta para personalizar a recomendação."} tone={activeOffer?.name ? "emerald" : "orange"} />
+                <SignalTile label="Melhor entrada" value={hasWhatsapp ? "WhatsApp consultivo" : "Enriquecer contato"} description={hasWhatsapp ? "Comece com uma pergunta curta e personalizada." : "Antes da proposta, valide telefone ou decisor."} tone={hasWhatsapp ? "cyan" : "orange"} />
+              </div>
             </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Necessidade provável</span><span className="text-emerald-200">{offerFit.need}%</span></div>
-              <ProgressBar value={offerFit.need} tone="emerald" />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Potencial financeiro</span><span className="text-orange-200">{offerFit.financial}%</span></div>
-              <ProgressBar value={offerFit.financial} tone="orange" />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs font-black uppercase text-slate-400"><span>Chance de resposta</span><span className="text-pink-200">{offerFit.response}%</span></div>
-              <ProgressBar value={offerFit.response} tone="pink" />
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-slate-400">
-              <span className="font-black text-white">Risco de desqualificação:</span> {offerFit.disqualificationRisk}
+
+            <div className="rounded-3xl border border-orange-400/20 bg-orange-400/[0.055] p-5">
+              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-orange-300"><AlertTriangle className="h-4 w-4" /> Leitura comercial segura</p>
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">{commercialPersona.warning}</p>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">A plataforma evita inventar dados: quando site, Instagram, agenda ou oferta não existem, isso aparece como lacuna e vira hipótese para validar na conversa.</p>
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <InsightList title="Gatilhos de compra" icon={<Zap className="h-4 w-4" />} items={offerFit.buyingTriggers} empty="Sem gatilhos claros." tone="emerald" />
-            <InsightList title="Hipóteses de dor" icon={<AlertTriangle className="h-4 w-4" />} items={offerFit.painHypotheses} empty="Sem dores prováveis." tone="orange" />
-            <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 md:col-span-2">
-              <p className="mb-2 flex items-center gap-2 text-sm font-black text-cyan-100"><MessageCircle className="h-4 w-4" /> Pergunta de abertura recomendada</p>
-              <p className="text-sm leading-relaxed text-slate-200">{firstQuestion}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400"><span className="font-black text-white">Decisor provável:</span> {decisionMakerHint}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <SignalTile label="Perfil do negócio" value={leadCategory || "Segmento não informado"} description={commercialPersona.demandSignal} tone="cyan" />
+            <SignalTile label="Operação provável" value={commercialPersona.operationSignal} description="Hipótese baseada nos sinais públicos encontrados." tone="slate" />
+            <SignalTile label="Canal comercial" value={commercialPersona.channelSignal} description={hasWhatsapp ? "Pode iniciar contato direto." : "Exige enriquecimento antes da abordagem."} tone={hasWhatsapp ? "emerald" : "orange"} />
+            <SignalTile label="Lacuna digital" value={commercialPersona.digitalGap} description="Use isso como gancho, não como afirmação absoluta." tone="pink" />
+
+            <div className="rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.06] p-5 md:col-span-2">
+              <p className="mb-3 flex items-center gap-2 text-sm font-black text-cyan-100"><Globe className="h-4 w-4" /> Mapa da identidade online</p>
+              <div className="flex flex-wrap gap-2">
+                {digitalAssets.map((asset, index) => (
+                  <Pill key={asset} tone={asset.includes("não") || asset.includes("ausente") ? "orange" : index === 0 ? "cyan" : "emerald"}>{asset}</Pill>
+                ))}
+              </div>
+              <p className="mt-4 text-sm leading-relaxed text-slate-300">{identityLevel.description}</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:col-span-2">
-              <p className="mb-2 text-sm font-black text-white">Hooks personalizados para mensagem</p>
-              <div className="flex flex-wrap gap-2">{offerFit.hooks.map((item, index) => <Pill key={index} tone={index === 0 ? "cyan" : index === 1 ? "pink" : "slate"}>{item}</Pill>)}</div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 md:col-span-2">
+              <p className="mb-2 flex items-center gap-2 text-sm font-black text-white"><MessageCircle className="h-4 w-4 text-emerald-300" /> Como abordar sem parecer genérico</p>
+              <p className="text-sm leading-relaxed text-slate-300">{commercialPersona.approach}</p>
+              <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-relaxed text-slate-200">{firstQuestion}</div>
             </div>
           </div>
         </div>
@@ -1020,12 +1121,12 @@ export function LeadProfile() {
       </div>
 
       <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-        <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><BadgeCheck className="h-5 w-5 text-cyan-300" /> Por que este lead entrou na busca?</h2>
+        <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><BadgeCheck className="h-5 w-5 text-cyan-300" /> Por que este lead merece atenção?</h2>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <DetailRow label="Contexto da busca" value={searchContext || "Nicho/local não informado"} hint="Segmento e localização salvos no lead" />
-          <DetailRow label="Contato público" value={hasWhatsapp ? "Encontrado" : "Não encontrado"} hint={hasWhatsapp ? "Pronto para abordagem" : "Exige enriquecimento"} />
-          <DetailRow label="Site" value={hasSite ? "Identificado" : "Ausente"} hint={hasSite ? "Permite scanner digital" : "Oportunidade de presença digital"} />
-          <DetailRow label="Prova social" value={reviewsCount ? `${lead.rating || "—"} • ${reviewsCount} avaliações` : "Sem dados"} hint="Avaliações públicas do Google" />
+          <DetailRow label="Contexto comercial" value={searchContext || "Nicho/local não informado"} hint="Segmento e região que explicam a entrada na busca" />
+          <DetailRow label="Acesso ao decisor" value={hasWhatsapp ? "Contato direto" : "Precisa enriquecer"} hint={hasWhatsapp ? "Pode abordar agora" : "Não priorizar sem telefone/WhatsApp"} />
+          <DetailRow label="Maturidade digital" value={identityLevel.label} hint={`${identityLevel.score}/100 pela leitura pública`} />
+          <DetailRow label="Prova social" value={reviewsCount ? `${lead.rating || "—"} • ${reviewsCount} avaliações` : "Sem dados"} hint={reviewsCount ? "Indica movimento real" : "Validar demanda na conversa"} />
         </div>
       </div>
 

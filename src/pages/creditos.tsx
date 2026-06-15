@@ -27,17 +27,19 @@ import {
 } from "lucide-react";
 
 /**
- * IMPORTANTE:
- * Os links reais da InfinitePay devem ser configurados no backend / Supabase Function
- * ou substituídos nos campos checkoutUrl abaixo, caso você queira usar link direto.
+ * INTEGRAÇÃO INFINITEPAY:
+ * Esta página já usa os links reais enviados.
  *
- * Modelo recomendado:
- * - Mensalidade como produto principal.
- * - Créditos inclusos todo mês.
- * - Recargas avulsas como upsell quando o cliente precisar de mais volume.
+ * Ao clicar em comprar:
+ * 1. A página registra uma intenção de pagamento na tabela payments.
+ * 2. Redireciona o cliente para o checkout da InfinitePay.
+ * 3. O webhook infinitepay-webhook recebe a aprovação.
+ * 4. O backend deve localizar o pagamento pendente e liberar os créditos.
  *
- * Assim o NXA não vira apenas "venda de lista".
- * Ele vira uma plataforma recorrente de inteligência comercial.
+ * Observação importante:
+ * Links criados manualmente na InfinitePay não carregam user_id dentro do webhook.
+ * Por isso esta página salva o pagamento como "pending" antes do redirecionamento.
+ * Para 100% de precisão, o ideal é gerar os checkouts pela Edge Function com order_nsu único.
  */
 
 type CreditProduct = {
@@ -75,7 +77,7 @@ const SUBSCRIPTION_PLANS: CreditProduct[] = [
     color: "border-primary/50 bg-primary/[0.06] hover:border-primary",
     popular: true,
     badge: "Melhor para vender hoje",
-    checkoutUrl: "", // Cole aqui o link da InfinitePay do plano R$97/mês, se quiser link direto.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/8rYwHt7BjP",
     benefits: [
       "500 créditos mensais",
       "Busca Inteligente liberada",
@@ -100,7 +102,7 @@ const SUBSCRIPTION_PLANS: CreditProduct[] = [
     icon: <Sparkles className="h-5 w-5" />,
     color: "hover:border-primary/60",
     popular: false,
-    checkoutUrl: "", // Cole aqui o link da InfinitePay do plano R$197/mês.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/oOI2Nj40zC",
     benefits: [
       "1.500 créditos mensais",
       "Score avançado por oferta",
@@ -125,7 +127,7 @@ const SUBSCRIPTION_PLANS: CreditProduct[] = [
     icon: <Crown className="h-5 w-5" />,
     color: "hover:border-primary/60",
     popular: false,
-    checkoutUrl: "", // Cole aqui o link da InfinitePay do plano R$397/mês.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/rWuefm0AOk",
     benefits: [
       "5.000 créditos mensais",
       "Tudo liberado na plataforma",
@@ -153,7 +155,7 @@ const TOPUP_PACKS: CreditProduct[] = [
     icon: <Wallet className="h-5 w-5" />,
     color: "hover:border-primary/60",
     popular: false,
-    checkoutUrl: "", // Cole aqui o link da InfinitePay da recarga R$29.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/MPcLD7zyFN",
     benefits: [
       "100 créditos extras",
       "Uso imediato após confirmação",
@@ -176,7 +178,7 @@ const TOPUP_PACKS: CreditProduct[] = [
     color: "border-primary/40 hover:border-primary",
     popular: true,
     badge: "Upsell recomendado",
-    checkoutUrl: "", // Cole aqui o link da InfinitePay da recarga R$97.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/bAdzJ5NMxl",
     benefits: [
       "500 créditos extras",
       "Perfeito para uma lista segmentada",
@@ -198,7 +200,7 @@ const TOPUP_PACKS: CreditProduct[] = [
     icon: <TrendingUp className="h-5 w-5" />,
     color: "hover:border-primary/60",
     popular: false,
-    checkoutUrl: "", // Cole aqui o link da InfinitePay da recarga R$167.
+    checkoutUrl: "https://checkout.infinitepay.io/isaque-elias-4d5/N9INBb5PJa",
     benefits: [
       "1.000 créditos extras",
       "Melhor custo por crédito avulso",
@@ -222,7 +224,8 @@ const CREDIT_USAGE_RULES = [
     icon: <Brain className="h-4 w-4" />,
     title: "Lead Profile IA",
     cost: "2 créditos",
-    description: "Análise de compatibilidade entre a oferta e o perfil do lead.",
+    description:
+      "Análise de compatibilidade entre a oferta e o perfil do lead.",
   },
   {
     icon: <Sparkles className="h-4 w-4" />,
@@ -234,7 +237,8 @@ const CREDIT_USAGE_RULES = [
     icon: <Infinity className="h-4 w-4" />,
     title: "Enriquecimento premium",
     cost: "3 créditos",
-    description: "Busca avançada por sinais digitais, site, redes e oportunidades.",
+    description:
+      "Busca avançada por sinais digitais, site, redes e oportunidades.",
   },
 ];
 
@@ -269,7 +273,8 @@ function getCreditHealth(credits: number) {
   if (credits <= 0) {
     return {
       label: "Sem créditos",
-      description: "Faça uma recarga ou assine um plano para continuar prospectando.",
+      description:
+        "Faça uma recarga ou assine um plano para continuar prospectando.",
       tone: "text-red-400",
       icon: <AlertTriangle className="h-4 w-4" />,
     };
@@ -278,7 +283,8 @@ function getCreditHealth(credits: number) {
   if (credits < 100) {
     return {
       label: "Saldo baixo",
-      description: "Você está próximo de ficar sem créditos. Recomendamos uma recarga.",
+      description:
+        "Você está próximo de ficar sem créditos. Recomendamos uma recarga.",
       tone: "text-amber-400",
       icon: <AlertTriangle className="h-4 w-4" />,
     };
@@ -286,7 +292,8 @@ function getCreditHealth(credits: number) {
 
   return {
     label: "Operação ativa",
-    description: "Você tem créditos disponíveis para buscar, analisar e priorizar leads.",
+    description:
+      "Você tem créditos disponíveis para buscar, analisar e priorizar leads.",
     tone: "text-emerald-400",
     icon: <CheckCircle2 className="h-4 w-4" />,
   };
@@ -307,6 +314,146 @@ function getCostPerCredit(product: CreditProduct) {
 function getBillingLabel(product: CreditProduct) {
   if (product.billing === "monthly") return "por mês";
   return "pagamento único";
+}
+
+function getProductIntentDescription(product: CreditProduct) {
+  if (product.type === "subscription") {
+    return `Assinatura ${product.label} - ${product.credits.toLocaleString("pt-BR")} créditos mensais`;
+  }
+
+  return `Recarga ${product.label} - ${product.credits.toLocaleString("pt-BR")} créditos extras`;
+}
+
+function buildPaymentInsertPayload(userId: string, product: CreditProduct) {
+  const localOrderNsu =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${product.id}-${Date.now()}`;
+
+  // Colunas confirmadas no seu banco public.payments:
+  // id, appointment_id, amount, pix_code, pix_qr, status, paid_at, created_at,
+  // order_nsu, transaction_nsu, provider, raw_payload, user_id, plan_id,
+  // credits, checkout_url, receipt_url e amount_cents.
+  // Esse payload deixa o pagamento pronto para o webhook chamar confirm_credit_payment(id).
+  return {
+    user_id: userId,
+    provider: "infinitepay",
+    status: "pending",
+    plan_id: product.id,
+    credits: product.credits,
+    amount: product.amountCents / 100,
+    amount_cents: product.amountCents,
+    checkout_url: product.checkoutUrl || null,
+    order_nsu: localOrderNsu,
+    raw_payload: {
+      source: "creditos_page",
+      product_id: product.id,
+      product_label: product.label,
+      product_type: product.type,
+      billing: product.billing,
+      credits: product.credits,
+      amount_cents: product.amountCents,
+      amount: product.amountCents / 100,
+      checkout_url: product.checkoutUrl || null,
+      description: getProductIntentDescription(product),
+      created_from: "static_infinitepay_link",
+      local_order_nsu: localOrderNsu,
+      created_at: new Date().toISOString(),
+    },
+  };
+}
+
+function savePendingPaymentLocally(userId: string, product: CreditProduct) {
+  try {
+    const raw = localStorage.getItem("nxa_pending_infinitepay_payments");
+    const current = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(current) ? current : [];
+
+    const record = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : String(Date.now()),
+      user_id: userId,
+      product_id: product.id,
+      product_type: product.type,
+      billing: product.billing,
+      credits: product.credits,
+      amount: product.amountCents / 100,
+      provider: "infinitepay",
+      checkout_url: product.checkoutUrl || null,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+
+    localStorage.setItem(
+      "nxa_pending_infinitepay_payments",
+      JSON.stringify([record, ...list].slice(0, 30)),
+    );
+  } catch {
+    // Não bloqueia o checkout.
+  }
+}
+
+async function tryInsertPayment(payload: Record<string, any>) {
+  try {
+    return await supabase
+      .from("payments")
+      .insert(payload)
+      .select("id")
+      .single();
+  } catch (error: any) {
+    return { data: null, error };
+  }
+}
+
+async function createPendingPaymentIntent(
+  userId: string,
+  product: CreditProduct,
+) {
+  const payload = buildPaymentInsertPayload(userId, product);
+
+  try {
+    const attempts = [
+      payload,
+      // Fallback caso o cache do PostgREST ainda não tenha alguma coluna nova.
+      {
+        user_id: payload.user_id,
+        amount: payload.amount,
+        status: payload.status,
+        provider: payload.provider,
+        order_nsu: payload.order_nsu,
+        raw_payload: payload.raw_payload,
+      },
+    ];
+
+    let lastError: any = null;
+
+    for (const attempt of attempts) {
+      const { data, error } = await tryInsertPayment(attempt);
+      if (!error) {
+        return { registered: true, paymentId: data?.id || null };
+      }
+      lastError = error;
+      console.warn("Tentativa de registrar payment falhou:", error.message);
+    }
+
+    savePendingPaymentLocally(userId, product);
+    console.warn(
+      "Pedido pendente salvo localmente. Revise a tabela payments:",
+      lastError?.message,
+    );
+
+    return { registered: false, paymentId: null };
+  } catch (error: any) {
+    savePendingPaymentLocally(userId, product);
+    console.warn(
+      "Falha inesperada ao registrar payment. Checkout será aberto mesmo assim:",
+      error?.message,
+    );
+
+    return { registered: false, paymentId: null };
+  }
 }
 
 export function Creditos() {
@@ -400,51 +547,37 @@ export function Creditos() {
     setBuyingPlan(product.id);
 
     try {
-      /**
-       * Se você quiser usar links diretos da InfinitePay no front, preencha
-       * checkoutUrl nos produtos acima. Enquanto estiver vazio, o código usa
-       * a Supabase Function rapid-handler para criar/retornar o checkout.
-       */
-      if (product.checkoutUrl) {
-        window.location.href = product.checkoutUrl;
-        return;
+      if (!product.checkoutUrl) {
+        throw new Error("Link de checkout não configurado para este produto.");
       }
 
-      const { data, error } = await supabase.functions.invoke("rapid-handler", {
-        body: {
-          plan_id: product.id,
-          product_id: product.id,
-          product_type: product.type,
-          billing: product.billing,
-          credits: product.credits,
-          amount_cents: product.amountCents,
-          label: product.label,
-        },
-      });
+      // Salva localmente antes de tentar o banco. Assim o clique nunca fica perdido.
+      savePendingPaymentLocally(userId, product);
 
-      if (error) {
-        console.error("Erro Supabase Function:", error);
-        throw new Error(error.message || "Erro ao criar checkout.");
-      }
-
-      if (!data?.checkout_url) {
-        throw new Error(
-          data?.error ||
-            data?.details ||
-            "A função respondeu, mas não retornou checkout_url."
-        );
-      }
-
-      window.location.href = data.checkout_url;
-    } catch (error: any) {
-      console.error("Erro ao criar checkout InfinitePay:", error);
+      const { registered, paymentId } = await createPendingPaymentIntent(
+        userId,
+        product,
+      );
 
       toast({
-        title: "Erro ao criar checkout",
-        description: error?.message || "Não foi possível iniciar o pagamento.",
+        title: "Redirecionando para pagamento",
+        description: registered
+          ? `Pedido #${paymentId || "pendente"} registrado. Após a aprovação, o webhook da InfinitePay vai liberar os créditos automaticamente.`
+          : "Não consegui registrar no banco, mas vou abrir o checkout. A liberação automática depende do registro em payments.",
+      });
+
+      window.location.assign(product.checkoutUrl);
+    } catch (error: any) {
+      console.error("Erro ao iniciar checkout InfinitePay:", error);
+
+      toast({
+        title: "Erro ao iniciar pagamento",
+        description:
+          error?.message ||
+          "Não foi possível registrar o pedido antes de abrir o checkout.",
         variant: "destructive",
       });
-    } finally {
+
       setBuyingPlan(null);
     }
   }
@@ -493,6 +626,11 @@ export function Creditos() {
             <p className="text-xs text-muted-foreground mt-1">
               Aproximadamente {getCostPerCredit(product)} por crédito
             </p>
+
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300">
+              <CheckCircle2 className="h-3 w-3" />
+              Checkout InfinitePay configurado
+            </div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
@@ -529,7 +667,10 @@ export function Creditos() {
     <div className="space-y-6 pb-10">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <Badge variant="outline" className="mb-3 border-primary/30 text-primary">
+          <Badge
+            variant="outline"
+            className="mb-3 border-primary/30 text-primary"
+          >
             Modelo recomendado: mensalidade + créditos extras
           </Badge>
 
@@ -546,17 +687,41 @@ export function Creditos() {
         </div>
 
         <Button variant="outline" onClick={loadCredits} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw
+            className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
+          />
           Atualizar
         </Button>
       </div>
+
+      <Card className="bg-amber-500/5 border-amber-500/20">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <div>
+              <p className="text-sm font-bold text-amber-100">
+                InfinitePay conectada por webhook
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Os botões abaixo apontam para os links da InfinitePay. Antes de
+                redirecionar, a NXA registra o pedido em payments com user_id,
+                credits, plan_id e amount_cents. Quando o webhook receber a
+                aprovação, ele deve chamar confirm_credit_payment(id) para
+                liberar os créditos na carteira do usuário.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
         <Card className="bg-gradient-to-br from-primary/15 via-primary/5 to-transparent border-primary/20 overflow-hidden">
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
               <div>
-                <p className="text-sm text-muted-foreground">Saldo disponível</p>
+                <p className="text-sm text-muted-foreground">
+                  Saldo disponível
+                </p>
 
                 <div className="flex items-end gap-3 mt-2">
                   <span className="text-6xl font-black text-primary">
@@ -571,7 +736,9 @@ export function Creditos() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-black/10 p-4 md:max-w-sm">
-                <div className={`flex items-center gap-2 font-bold ${creditHealth.tone}`}>
+                <div
+                  className={`flex items-center gap-2 font-bold ${creditHealth.tone}`}
+                >
                   {creditHealth.icon}
                   {creditHealth.label}
                 </div>
@@ -643,7 +810,10 @@ export function Creditos() {
             </p>
           </div>
 
-          <Badge variant="outline" className="w-fit border-primary/30 text-primary">
+          <Badge
+            variant="outline"
+            className="w-fit border-primary/30 text-primary"
+          >
             Compra avulsa
           </Badge>
         </div>
