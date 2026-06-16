@@ -36,6 +36,7 @@ import {
   ClipboardList,
   Lightbulb,
   Rocket,
+  Search,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
@@ -83,6 +84,19 @@ type InstagramProfile = {
   external_url?: string;
   profile_pic_url?: string;
   url?: string;
+};
+
+
+type SocialProfile = {
+  network: "instagram" | "facebook" | "linkedin" | "tiktok" | "youtube" | "whatsapp";
+  label: string;
+  username?: string;
+  url?: string;
+  found: boolean;
+  followers?: number | string;
+  posts?: number | string;
+  description?: string;
+  tone: "pink" | "blue" | "cyan" | "red" | "emerald" | "slate";
 };
 
 type LeadIntelligence = {
@@ -331,6 +345,258 @@ function BooleanSignal({ value, label }: { value?: boolean; label: string }) {
       ) : (
         <span className="flex items-center gap-1 rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-xs font-black text-red-300"><XCircle className="h-3.5 w-3.5" /> Não</span>
       )}
+    </div>
+  );
+}
+
+
+
+function normalizeAnyUrl(value?: any) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  if (raw.startsWith("@")) return raw;
+  if (raw.includes(".") && !raw.includes(" ")) return `https://${raw}`;
+  return raw;
+}
+
+function socialUsernameFromUrl(value?: any) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.startsWith("@")) return raw.replace("@", "");
+  try {
+    const url = raw.startsWith("http") ? new URL(raw) : new URL(`https://${raw}`);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return (parts[0] || "").replace("@", "");
+  } catch {
+    return raw.replace("@", "").split(/[/?#]/)[0];
+  }
+}
+
+function ensureSocialUrl(network: SocialProfile["network"], value?: any) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+
+  const username = raw.replace("@", "").replace(/^https?:\/\//, "").split(/[/?#\s]/)[0];
+  if (!username) return "";
+
+  const base: Record<SocialProfile["network"], string> = {
+    instagram: "https://instagram.com/",
+    facebook: "https://facebook.com/",
+    linkedin: "https://linkedin.com/company/",
+    tiktok: "https://tiktok.com/@",
+    youtube: "https://youtube.com/@",
+    whatsapp: "https://wa.me/",
+  };
+
+  return `${base[network]}${username}`;
+}
+
+function firstSocialValue(...values: any[]) {
+  for (const value of values) {
+    if (!value) continue;
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "object") {
+      if (value.url) return value.url;
+      if (value.link) return value.link;
+      if (value.profile_url) return value.profile_url;
+      if (value.username) return value.username;
+      if (value.handle) return value.handle;
+    }
+  }
+  return "";
+}
+
+function buildSocialSearchUrl(leadName: string, city?: string, network?: string) {
+  const query = [leadName, city, network].filter(Boolean).join(" ");
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
+function buildSocialProfiles(params: {
+  lead: any;
+  scan: any;
+  socials: any;
+  instagramProfile?: InstagramProfile | null;
+  instagramUrl?: string;
+  whatsapp?: string;
+}) {
+  const { lead, scan, socials, instagramProfile, instagramUrl, whatsapp } = params;
+  const scanLinks = scan?.social_links || {};
+  const scanIntel = scan?.social_intelligence || {};
+  const leadLinks = lead?.social_links || lead?.socials || {};
+
+  const instagramValue = firstSocialValue(
+    instagramUrl,
+    instagramProfile?.url,
+    instagramProfile?.username,
+    socials?.instagram,
+    socials?.instagram_url,
+    scanLinks?.instagram,
+    scanIntel?.instagram?.source_url,
+    leadLinks?.instagram,
+    lead?.instagram,
+    lead?.instagram_url
+  );
+
+  const facebookValue = firstSocialValue(
+    socials?.facebook,
+    socials?.facebook_url,
+    scanLinks?.facebook,
+    scanIntel?.facebook?.source_url,
+    leadLinks?.facebook,
+    lead?.facebook,
+    lead?.facebook_url
+  );
+
+  const linkedinValue = firstSocialValue(
+    socials?.linkedin,
+    socials?.linkedin_url,
+    scanLinks?.linkedin,
+    scanIntel?.linkedin?.source_url,
+    leadLinks?.linkedin,
+    lead?.linkedin,
+    lead?.linkedin_url
+  );
+
+  const tiktokValue = firstSocialValue(
+    socials?.tiktok,
+    socials?.tiktok_url,
+    scanLinks?.tiktok,
+    scanIntel?.tiktok?.source_url,
+    leadLinks?.tiktok,
+    lead?.tiktok,
+    lead?.tiktok_url
+  );
+
+  const youtubeValue = firstSocialValue(
+    socials?.youtube,
+    socials?.youtube_url,
+    scanLinks?.youtube,
+    scanIntel?.youtube?.source_url,
+    leadLinks?.youtube,
+    lead?.youtube,
+    lead?.youtube_url
+  );
+
+  const profiles: SocialProfile[] = [
+    {
+      network: "instagram",
+      label: "Instagram",
+      username: instagramProfile?.username || socialUsernameFromUrl(instagramValue),
+      url: ensureSocialUrl("instagram", instagramValue),
+      found: Boolean(instagramValue || instagramProfile?.username),
+      followers: instagramProfile?.followers,
+      posts: instagramProfile?.posts_count,
+      description: instagramProfile?.biography || "Conteúdo, prova social, frequência de postagem e posicionamento da marca.",
+      tone: "pink",
+    },
+    {
+      network: "facebook",
+      label: "Facebook",
+      username: socialUsernameFromUrl(facebookValue),
+      url: ensureSocialUrl("facebook", facebookValue),
+      found: Boolean(facebookValue),
+      description: "Página local, avaliações, comunidade e sinais de atendimento.",
+      tone: "blue",
+    },
+    {
+      network: "linkedin",
+      label: "LinkedIn",
+      username: socialUsernameFromUrl(linkedinValue),
+      url: ensureSocialUrl("linkedin", linkedinValue),
+      found: Boolean(linkedinValue),
+      description: "Perfil institucional, decisores e maturidade B2B.",
+      tone: "cyan",
+    },
+    {
+      network: "tiktok",
+      label: "TikTok",
+      username: socialUsernameFromUrl(tiktokValue),
+      url: ensureSocialUrl("tiktok", tiktokValue),
+      found: Boolean(tiktokValue),
+      description: "Conteúdo rápido, viralização e presença de marca local.",
+      tone: "slate",
+    },
+    {
+      network: "youtube",
+      label: "YouTube",
+      username: socialUsernameFromUrl(youtubeValue),
+      url: ensureSocialUrl("youtube", youtubeValue),
+      found: Boolean(youtubeValue),
+      description: "Autoridade, vídeos, depoimentos e demonstrações.",
+      tone: "red",
+    },
+    {
+      network: "whatsapp",
+      label: "WhatsApp",
+      username: whatsapp ? `+${whatsapp}` : "",
+      url: whatsapp ? ensureSocialUrl("whatsapp", whatsapp) : "",
+      found: Boolean(whatsapp),
+      description: "Canal direto de abordagem comercial.",
+      tone: "emerald",
+    },
+  ];
+
+  return profiles;
+}
+
+function SocialNetworkCard({ profile, leadName, city }: { profile: SocialProfile; leadName: string; city?: string }) {
+  const toneMap = {
+    pink: "border-pink-400/20 bg-pink-400/[0.07] text-pink-200",
+    blue: "border-blue-400/20 bg-blue-400/[0.07] text-blue-200",
+    cyan: "border-cyan-400/20 bg-cyan-400/[0.07] text-cyan-200",
+    red: "border-red-400/20 bg-red-400/[0.07] text-red-200",
+    emerald: "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200",
+    slate: "border-white/10 bg-white/[0.04] text-slate-200",
+  };
+
+  const searchUrl = buildSocialSearchUrl(leadName, city, profile.label);
+
+  return (
+    <div className={`group relative overflow-hidden rounded-3xl border p-4 transition-all hover:-translate-y-1 hover:bg-white/[0.06] ${toneMap[profile.tone]}`}>
+      <div className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-white/10 blur-3xl" />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-70">{profile.label}</p>
+          <h3 className="mt-2 truncate text-lg font-black text-white">{profile.found ? (profile.username ? `@${profile.username.replace("@", "")}` : "Perfil encontrado") : "Não encontrado"}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">{profile.description}</p>
+        </div>
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${profile.found ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : "border-orange-400/20 bg-orange-400/10 text-orange-300"}`}>
+          {profile.found ? <CheckCircle2 className="h-5 w-5" /> : <Search className="h-5 w-5" />}
+        </div>
+      </div>
+
+      {(profile.followers || profile.posts) ? (
+        <div className="relative mt-4 grid grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+            <p className="text-[10px] font-black uppercase text-slate-500">Seguidores</p>
+            <p className="text-lg font-black text-white">{formatNumber(profile.followers)}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+            <p className="text-[10px] font-black uppercase text-slate-500">Posts</p>
+            <p className="text-lg font-black text-white">{formatNumber(profile.posts)}</p>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="relative mt-4 grid grid-cols-2 gap-2">
+        {profile.url ? (
+          <a href={profile.url} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white hover:border-cyan-400/30">
+            Abrir <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        ) : (
+          <a href={searchUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white hover:border-cyan-400/30">
+            Buscar <Search className="h-3.5 w-3.5" />
+          </a>
+        )}
+        <a href={searchUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-black text-slate-200 hover:border-pink-400/30">
+          Validar <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </div>
     </div>
   );
 }
@@ -781,6 +1047,65 @@ export function LeadProfile() {
 
     try {
       const activeOffer = offer || (await loadOffer(userId));
+
+      // Primeiro tenta enriquecer o lead na web para trazer Instagram e outras redes.
+      // Se a Edge Function ainda não existir, a análise continua normalmente com os dados atuais.
+      let enrichedLead = lead;
+      let webEnrichment: any = null;
+      try {
+        const enrichResponse = await supabase.functions.invoke("enrich-lead-web", {
+          body: {
+            user_id: userId,
+            lead_id: lead.id,
+            lead_name: getLeadName(enrichedLead),
+            lead_phone: getLeadPhone(enrichedLead),
+            lead_website: getLeadWebsite(enrichedLead),
+            lead_category: getLeadCategory(enrichedLead),
+            lead_city: getLeadCity(enrichedLead),
+            lead_state: getLeadState(enrichedLead),
+            address: getLeadAddress(enrichedLead),
+            sales_offer: activeOffer,
+            lead_raw: enrichedLead,
+          web_enrichment: webEnrichment,
+          },
+        });
+
+        if (!enrichResponse.error && enrichResponse.data) {
+          webEnrichment = enrichResponse.data?.enrichment || enrichResponse.data;
+          enrichedLead = {
+            ...lead,
+            ...(webEnrichment?.lead || {}),
+            website_scan: webEnrichment?.website_scan || webEnrichment?.lead?.website_scan || lead?.website_scan,
+            social_links: webEnrichment?.social_links || webEnrichment?.lead?.social_links || lead?.social_links,
+            social_profiles: webEnrichment?.social_profiles || webEnrichment?.lead?.social_profiles || lead?.social_profiles,
+            payload: {
+              ...(lead?.payload || {}),
+              web_enrichment: webEnrichment,
+              website_scan: webEnrichment?.website_scan || lead?.payload?.website_scan,
+              social_links: webEnrichment?.social_links || lead?.payload?.social_links,
+              social_profiles: webEnrichment?.social_profiles || lead?.payload?.social_profiles,
+            },
+          };
+          setLead(enrichedLead);
+
+          try {
+            await supabase
+              .from("leads")
+              .update({
+                website: getLeadWebsite(enrichedLead) || lead.website || null,
+                payload: enrichedLead.payload,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", lead.id)
+              .eq("user_id", userId);
+          } catch (persistError) {
+            console.warn("Enriquecimento web não foi persistido no lead:", persistError);
+          }
+        }
+      } catch (enrichError) {
+        console.warn("enrich-lead-web indisponível; seguindo com análise local:", enrichError);
+      }
+
       const { data, error } = await supabase.functions.invoke("analyze-lead", {
         body: {
           user_id: userId,
@@ -792,9 +1117,9 @@ export function LeadProfile() {
           lead_city: getLeadCity(lead),
           lead_state: getLeadState(lead),
           address: getLeadAddress(lead),
-          rating: lead.rating,
-          reviews_count: lead.reviews_count || lead.user_ratings_total,
-          cnpj: lead.cnpj || "",
+          rating: enrichedLead.rating,
+          reviews_count: enrichedLead.reviews_count || enrichedLead.user_ratings_total || enrichedLead.google_reviews_count,
+          cnpj: enrichedLead.cnpj || "",
           sales_offer: activeOffer,
           requested_outputs: [
             "compatibility_score",
@@ -810,7 +1135,12 @@ export function LeadProfile() {
             "personalization_hooks",
             "decision_maker_hint",
             "first_question",
-            "approach_message"
+            "approach_message",
+            "website_scan",
+            "social_links",
+            "social_intelligence",
+            "social_summary",
+            "social_opportunities"
           ],
           scoring_weights: { compatibility: 0.34, need: 0.26, financial: 0.2, response: 0.2 },
           lead_raw: lead,
@@ -899,8 +1229,10 @@ export function LeadProfile() {
   const pitch = intelligence?.approach_message || intelligence?.ai_pitch || `Olá, tudo bem? Vi a ${leadName} e acredito que a nossa solução pode ajudar vocês a melhorar o atendimento, captar mais oportunidades e organizar o processo comercial.`;
   const whatsappUrl = whatsapp ? `https://wa.me/55${whatsapp.replace(/^55/, "")}?text=${encodeURIComponent(pitch)}` : "";
   const websiteUrl = normalizeWebsite(leadWebsite);
-  const scan = intelligence?.website_scan || {};
-  const socials = intelligence?.social_links || {};
+  const leadPayload = lead?.payload || {};
+  const webPayload = leadPayload?.web_enrichment || leadPayload?.enrichment || {};
+  const scan = intelligence?.website_scan || lead?.website_scan || leadPayload?.website_scan || webPayload?.website_scan || {};
+  const socials = intelligence?.social_links || lead?.social_links || leadPayload?.social_links || webPayload?.social_links || {};
   const instagramIntel = scan?.social_intelligence?.instagram || null;
   const instagramProfile: InstagramProfile | null = instagramIntel?.profile || socials.instagram_profile || null;
   const instagramUrl = instagramProfile?.url || instagramIntel?.source_url || socials.instagram || "";
@@ -971,8 +1303,34 @@ export function LeadProfile() {
     hasPixel || hasAnalytics ? "Medição digital detectada" : "Medição digital não detectada",
   ];
 
+  const socialProfiles = buildSocialProfiles({ lead, scan, socials, instagramProfile, instagramUrl, whatsapp });
+  const businessSocialProfiles = socialProfiles.filter((profile) => profile.network !== "whatsapp");
+  const foundBusinessSocialProfiles = businessSocialProfiles.filter((profile) => profile.found);
+  const socialCoverage = clampScore(Math.round((foundBusinessSocialProfiles.length / Math.max(businessSocialProfiles.length, 1)) * 100));
+  const socialSearchUrl = buildSocialSearchUrl(leadName, getLeadCity(lead), "Instagram Facebook LinkedIn TikTok");
+  const instagramSocial = businessSocialProfiles.find((profile) => profile.network === "instagram");
+  const primarySocial = foundBusinessSocialProfiles.find((profile) => profile.network === "instagram") || foundBusinessSocialProfiles[0] || null;
+  const hasBusinessInstagram = Boolean(instagramSocial?.found);
+  const confirmedChannels = [hasWhatsapp ? "WhatsApp" : "", hasSite ? "Site" : "", ...foundBusinessSocialProfiles.map((profile) => profile.label)].filter(Boolean);
+  const cleanInstagramLabel = hasBusinessInstagram
+    ? (instagramSocial?.username ? `@${String(instagramSocial.username).replace("@", "")}` : "Instagram encontrado")
+    : "Instagram não confirmado";
+  const socialPositioning = foundBusinessSocialProfiles.length >= 3
+    ? "A empresa tem presença online suficiente para uma abordagem bem personalizada. Antes de chamar, olhe o tom das publicações e use um detalhe real da marca."
+    : foundBusinessSocialProfiles.length >= 1
+      ? "Existe algum sinal social, mas ainda vale validar o perfil antes de usar isso como gancho na mensagem."
+      : "Não encontrei redes confiáveis automaticamente. A melhor ação é usar a busca assistida e validar manualmente antes de personalizar a abordagem.";
+  const socialOpportunityText = primarySocial
+    ? `Use ${primarySocial.label} como apoio: observe linguagem, comentários, frequência de conteúdo e sinais de demanda antes de enviar a proposta de ${activeOffer?.name || "sua oferta"}.`
+    : `Sem rede social confirmada, aborde pelo WhatsApp ou site com uma pergunta simples e valide se ${activeOffer?.name || "sua oferta"} faz sentido para o momento do lead.`;
+  const socialOfferFitText = activeOffer?.name
+    ? foundBusinessSocialProfiles.length
+      ? `As redes ajudam a conectar ${activeOffer.name} com a realidade do lead sem parecer mensagem copiada.`
+      : `A oferta ${activeOffer.name} pode fazer sentido, mas falta contexto social para personalizar melhor.`
+    : "Cadastre uma oferta na Busca Inteligente para a IA cruzar redes sociais, dor provável e abordagem ideal.";
+  const shortReason = commercialPersona.opportunity || reason;
   return (
-    <div className="relative space-y-6 pb-28">
+    <div className="relative space-y-5 pb-28">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(34,211,238,0.10),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(236,72,153,0.10),transparent_24%),linear-gradient(180deg,rgba(2,6,23,0.98),rgba(2,6,23,1))]" />
 
       <Link href="/leads">
@@ -981,376 +1339,204 @@ export function LeadProfile() {
         </button>
       </Link>
 
-      <div className="relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-[#050914]/90 p-6 shadow-[0_0_80px_rgba(34,211,238,0.10)] backdrop-blur-xl">
+      <section className="relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-[#050914]/90 p-5 shadow-[0_0_80px_rgba(34,211,238,0.10)] backdrop-blur-xl">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(34,211,238,0.18),transparent_32%),radial-gradient(circle_at_85%_0%,rgba(236,72,153,0.12),transparent_28%)]" />
-        <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
+        <div className="relative grid gap-5 xl:grid-cols-[1.15fr_0.85fr] xl:items-stretch">
           <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 text-cyan-400"><Building2 className="h-5 w-5" /><span className="text-xs font-bold uppercase">AI Sales Intelligence Profile</span></div>
+            <div className="mb-2 flex items-center gap-2 text-cyan-400"><Building2 className="h-5 w-5" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Perfil comercial do lead</span></div>
             <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">{leadName || "Lead sem nome"}</h1>
             <p className="mt-2 text-slate-400">{leadCategory || "Segmento não informado"} • {getLeadAddress(lead)}</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Pill tone={score >= 75 ? "emerald" : score >= 50 ? "cyan" : "orange"}>{temperature}</Pill>
-              <Pill tone="pink">{intelligence ? "IA analisada" : "IA pendente"}</Pill>
-              {activeOffer?.name ? <Pill tone="slate">Oferta: {activeOffer.name}</Pill> : <Pill tone="orange">Oferta não cadastrada</Pill>}
-            </div>
-          </div>
 
-          <div className="grid min-w-[260px] grid-cols-3 gap-3 rounded-3xl border border-white/10 bg-black/20 p-4">
-            <div>
-              <p className="text-[10px] font-black uppercase text-slate-500">Score IA</p>
-              <div className={`mt-1 flex items-center gap-1 text-3xl font-black ${getScoreColor(score)}`}>{getScoreIcon(score)}{score}</div>
-              <ProgressBar value={score} tone="emerald" />
-            </div>
-            <div>
-              <p className="text-[10px] font-black uppercase text-slate-500">Fit</p>
-              <p className="mt-1 text-3xl font-black text-cyan-200">{fitScore || score}</p>
-              <ProgressBar value={fitScore || score} tone="cyan" />
-            </div>
-            <div>
-              <p className="text-[10px] font-black uppercase text-slate-500">Prioridade</p>
-              <p className={`mt-1 text-2xl font-black ${priorityLevel.tone === "emerald" ? "text-emerald-200" : priorityLevel.tone === "orange" ? "text-orange-200" : "text-slate-300"}`}>{priorityLevel.label}</p>
-              <ProgressBar value={score} tone={priorityLevel.tone === "emerald" ? "emerald" : priorityLevel.tone === "orange" ? "orange" : "cyan"} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="relative overflow-hidden rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.06] p-5 shadow-[0_0_60px_rgba(16,185,129,0.08)]">
-          <div className="pointer-events-none absolute right-0 top-0 h-32 w-32 rounded-full bg-emerald-400/10 blur-3xl" />
-          <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-emerald-300"><Rocket className="h-4 w-4" /> Recomendação executiva IA</p>
-              <h2 className="mt-2 text-3xl font-black tracking-tight text-white">{recommendation.label}</h2>
-              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">{recommendation.description}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Pill tone={recommendation.tone}>{score >= 75 ? "Prioridade comercial" : score >= 50 ? "Validar oportunidade" : "Baixa prioridade"}</Pill>
-                <Pill tone="cyan">Fit {fitScore || score}%</Pill>
-                <Pill tone={intentLevel.tone}>Intenção observável: {intentLevel.label}</Pill>
-                <Pill tone="slate">Confiança {analysisConfidence}%</Pill>
-                {activeOffer?.name ? <Pill tone="emerald">Oferta conectada</Pill> : <Pill tone="orange">Oferta pendente</Pill>}
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] p-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">Decisão</p>
+                <p className="mt-1 text-xl font-black text-white">{score >= 70 ? "Abordar" : score >= 50 ? "Qualificar" : "Nutrir"}</p>
+                <p className="mt-1 text-xs text-slate-400">{priorityLevel.description}</p>
+              </div>
+              <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.08] p-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Melhor canal</p>
+                <p className="mt-1 text-xl font-black text-white">{hasWhatsapp ? "WhatsApp" : hasSite ? "Site" : primarySocial?.label || "Validar contato"}</p>
+                <p className="mt-1 text-xs text-slate-400">{hasWhatsapp ? "Canal direto pronto para abordagem." : "Antes de vender, confirme o contato."}</p>
+              </div>
+              <div className="rounded-2xl border border-pink-400/20 bg-pink-400/[0.08] p-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pink-300">Redes</p>
+                <p className="mt-1 text-xl font-black text-white">{foundBusinessSocialProfiles.length}/{businessSocialProfiles.length}</p>
+                <p className="mt-1 text-xs text-slate-400">{cleanInstagramLabel}</p>
               </div>
             </div>
-            <div className="min-w-[220px] rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Decisão sugerida</p>
-              <p className="mt-2 text-2xl font-black text-white">{score >= 70 ? "Atacar" : score >= 50 ? "Nutrir" : "Automatizar"}</p>
-              <p className="mt-1 text-xs text-slate-400">Baseado em score, fit, sinais digitais e sinais públicos auditáveis.</p>
-            </div>
           </div>
-        </div>
 
-        <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-300"><DollarSign className="h-4 w-4" /> Projeção financeira</p>
-          {hasFinancialProjection ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <DetailRow label="Oferta usada" value={activeOffer?.name || "Oferta"} hint={`Preço base ${String(activeOffer?.price || ticket)}`} />
-              <DetailRow label="Receita ponderada" value={moneyBRL(expectedRevenue)} hint="Preço x intenção observável" />
-              <DetailRow label="LTV 12 meses" value={moneyBRL(estimatedLtv)} hint="Preço mensal x 12" />
-            </div>
-          ) : (
-            <EmptyState text="Cadastre uma oferta com preço na Busca Inteligente para habilitar projeções financeiras. Sem oferta cadastrada, a IA mostra apenas prioridade, fit e sinais auditáveis." />
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-cyan-400/15 bg-[#060b16]/90 p-5 shadow-[0_0_90px_rgba(34,211,238,0.08)] backdrop-blur-xl">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-300"><Brain className="h-4 w-4" /> Perfil comercial + identidade na internet</p>
-            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">O que realmente importa sobre este lead</h2>
-            <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-400">
-              A NXA cruza dados públicos, presença digital, contato, avaliações, segmento e oferta cadastrada para explicar se vale abordar, como abordar e qual oportunidade existe.
-            </p>
-          </div>
-          <div className={`rounded-2xl border px-5 py-4 text-right ${identityLevel.tone === "emerald" ? "border-emerald-400/20 bg-emerald-400/10" : identityLevel.tone === "cyan" ? "border-cyan-400/20 bg-cyan-400/10" : "border-orange-400/20 bg-orange-400/10"}`}>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Identidade digital</p>
-            <p className="mt-1 text-2xl font-black text-white">{identityLevel.label}</p>
-            <p className="text-xs font-bold text-slate-300">{identityLevel.score}/100 de presença pública</p>
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.06] p-5">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-300"><Target className="h-4 w-4" /> Oportunidade detectada</p>
-              <h3 className="mt-2 text-2xl font-black text-white">{commercialScore >= 70 ? "Vale abordagem comercial" : commercialScore >= 52 ? "Vale qualificação" : "Manter em nutrição"}</h3>
-              <p className="mt-3 text-sm leading-relaxed text-slate-300">{commercialPersona.opportunity}</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <SignalTile label="Oferta recomendada" value={recommendedOfferText} description={activeOffer?.description || "Cadastre uma oferta para personalizar a recomendação."} tone={activeOffer?.name ? "emerald" : "orange"} />
-                <SignalTile label="Melhor entrada" value={hasWhatsapp ? "WhatsApp consultivo" : "Enriquecer contato"} description={hasWhatsapp ? "Comece com uma pergunta curta e personalizada." : "Antes da proposta, valide telefone ou decisor."} tone={hasWhatsapp ? "cyan" : "orange"} />
+          <div className="rounded-3xl border border-white/10 bg-black/25 p-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Score</p>
+                <div className={`mt-1 flex items-center gap-1 text-3xl font-black ${getScoreColor(score)}`}>{getScoreIcon(score)}{score}</div>
+                <ProgressBar value={score} tone="emerald" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Fit</p>
+                <p className="mt-1 text-3xl font-black text-cyan-200">{fitScore || score}</p>
+                <ProgressBar value={fitScore || score} tone="cyan" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Confiança</p>
+                <p className="mt-1 text-3xl font-black text-pink-200">{analysisConfidence}</p>
+                <ProgressBar value={analysisConfidence} tone="pink" />
               </div>
             </div>
-
-            <div className="rounded-3xl border border-orange-400/20 bg-orange-400/[0.055] p-5">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-orange-300"><AlertTriangle className="h-4 w-4" /> Leitura comercial segura</p>
-              <p className="mt-2 text-sm leading-relaxed text-slate-300">{commercialPersona.warning}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-500">A plataforma evita inventar dados: quando site, Instagram, agenda ou oferta não existem, isso aparece como lacuna e vira hipótese para validar na conversa.</p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <SignalTile label="Perfil do negócio" value={leadCategory || "Segmento não informado"} description={commercialPersona.demandSignal} tone="cyan" />
-            <SignalTile label="Operação provável" value={commercialPersona.operationSignal} description="Hipótese baseada nos sinais públicos encontrados." tone="slate" />
-            <SignalTile label="Canal comercial" value={commercialPersona.channelSignal} description={hasWhatsapp ? "Pode iniciar contato direto." : "Exige enriquecimento antes da abordagem."} tone={hasWhatsapp ? "emerald" : "orange"} />
-            <SignalTile label="Lacuna digital" value={commercialPersona.digitalGap} description="Use isso como gancho, não como afirmação absoluta." tone="pink" />
-
-            <div className="rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.06] p-5 md:col-span-2">
-              <p className="mb-3 flex items-center gap-2 text-sm font-black text-cyan-100"><Globe className="h-4 w-4" /> Mapa da identidade online</p>
-              <div className="flex flex-wrap gap-2">
-                {digitalAssets.map((asset, index) => (
-                  <Pill key={asset} tone={asset.includes("não") || asset.includes("ausente") ? "orange" : index === 0 ? "cyan" : "emerald"}>{asset}</Pill>
-                ))}
-              </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-300">{identityLevel.description}</p>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 md:col-span-2">
-              <p className="mb-2 flex items-center gap-2 text-sm font-black text-white"><MessageCircle className="h-4 w-4 text-emerald-300" /> Como abordar sem parecer genérico</p>
-              <p className="text-sm leading-relaxed text-slate-300">{commercialPersona.approach}</p>
-              <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-relaxed text-slate-200">{firstQuestion}</div>
+            <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.07] p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.20em] text-emerald-300">Próxima melhor ação</p>
+              <p className="mt-2 text-sm font-bold leading-relaxed text-slate-200">{nextAction}</p>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={<Target className="h-5 w-5" />} label="Aderência com a oferta" value={`${offerFit.compatibility}%`} hint="Produto x sinais públicos" tone="cyan" />
-        <MetricCard icon={<TrendingUp className="h-5 w-5" />} label="Intenção observável" value={intentLevel.label} hint={intentLevel.description} tone={intentLevel.tone === "emerald" ? "emerald" : intentLevel.tone === "orange" ? "orange" : "purple"} />
-        <MetricCard icon={<ShieldCheck className="h-5 w-5" />} label="Confiança da análise" value={`${analysisConfidence}%`} hint="Volume de dados públicos encontrados" tone="emerald" />
-        <MetricCard icon={<Rocket className="h-5 w-5" />} label="Nível de oportunidade" value={priorityLevel.label} hint={priorityLevel.description} tone={priorityLevel.tone === "emerald" ? "emerald" : priorityLevel.tone === "orange" ? "orange" : "purple"} />
-      </div>
-
-      <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-        <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><BadgeCheck className="h-5 w-5 text-cyan-300" /> Por que este lead merece atenção?</h2>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <DetailRow label="Contexto comercial" value={searchContext || "Nicho/local não informado"} hint="Segmento e região que explicam a entrada na busca" />
-          <DetailRow label="Acesso ao decisor" value={hasWhatsapp ? "Contato direto" : "Precisa enriquecer"} hint={hasWhatsapp ? "Pode abordar agora" : "Não priorizar sem telefone/WhatsApp"} />
-          <DetailRow label="Maturidade digital" value={identityLevel.label} hint={`${identityLevel.score}/100 pela leitura pública`} />
-          <DetailRow label="Prova social" value={reviewsCount ? `${lead.rating || "—"} • ${reviewsCount} avaliações` : "Sem dados"} hint={reviewsCount ? "Indica movimento real" : "Validar demanda na conversa"} />
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-3xl border border-orange-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><DollarSign className="h-5 w-5 text-orange-300" /> Simulador comercial defensável</h2>
-          {hasFinancialProjection ? (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <DetailRow label="Cenário conservador" value={`+${roiClients} clientes/mês`} hint="Hipótese para argumentação" />
-                <DetailRow label="Ticket médio do segmento" value={moneyBRL(averageClientTicket)} hint="Referência operacional, não promessa" />
-                <DetailRow label="Receita adicional possível" value={moneyBRL(possibleExtraRevenue)} hint="Clientes x ticket médio" />
-                <DetailRow label="Relação investimento/ganho" value={`${roiPercent}%`} hint="Cenário, não garantia" />
-              </div>
-              <p className="mt-4 rounded-2xl border border-orange-400/15 bg-orange-400/[0.06] p-3 text-sm leading-relaxed text-slate-300">
-                Use como argumento consultivo: se a solução gerar apenas {roiClients} novos clientes/mês, o ganho pode ajudar a justificar o investimento. Valide ticket, volume e margem na conversa.
-              </p>
-            </>
-          ) : (
-            <EmptyState text="Sem preço de oferta cadastrado, a plataforma não estima ROI. Isso evita números inventados e mantém a análise explicável para o cliente." />
-          )}
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.055] p-5">
+          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-300"><Rocket className="h-4 w-4" /> Resumo da IA para vender</p>
+          <h2 className="mt-2 text-2xl font-black text-white">{recommendation.label}</h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-300">{shortReason}</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <SignalTile label="Oferta indicada" value={recommendedOfferText} description={activeOffer?.description || "Cadastre uma oferta para a IA cruzar produto x lead com mais precisão."} tone={activeOffer?.name ? "emerald" : "orange"} />
+            <SignalTile label="Abordagem" value={hasWhatsapp ? "WhatsApp consultivo" : "Validar canal primeiro"} description={commercialPersona.approach} tone={hasWhatsapp ? "cyan" : "orange"} />
+          </div>
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><BarChart3 className="h-5 w-5 text-cyan-300" /> Como a IA chegou ao score</h2>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <ScoreFactor label="Telefone/WhatsApp encontrado" value={hasWhatsapp ? 15 : -10} positive={hasWhatsapp} />
-            <ScoreFactor label="Site identificado" value={hasSite ? 10 : -5} positive={hasSite} />
-            <ScoreFactor label="Avaliações e prova social" value={reviewsCount >= 50 ? 20 : reviewsCount >= 10 ? 10 : 3} positive={reviewsCount >= 10} />
-            <ScoreFactor label="Agendamento online" value={hasOnlineScheduling ? 5 : -12} positive={hasOnlineScheduling} />
-            <ScoreFactor label="Presença social" value={hasInstagram ? 10 : -6} positive={hasInstagram} />
-            <ScoreFactor label="Medição/remarketing" value={hasPixel || hasAnalytics ? 8 : -6} positive={hasPixel || hasAnalytics} />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-300">Mensagem pronta</p>
+              <h2 className="mt-2 text-xl font-black text-white">Abordagem personalizada</h2>
+            </div>
+            <button onClick={() => copyText(pitch)} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-black text-slate-200 hover:border-cyan-400/30"><Copy className="h-4 w-4" /> Copiar</button>
           </div>
-          <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] p-4 text-sm leading-relaxed text-slate-300">
-            <p className="font-black text-cyan-100">Resumo explicável da IA</p>
-            <p className="mt-2">
-              Este lead recebeu score {score}/100 porque {hasWhatsapp ? "possui telefone/WhatsApp público" : "não possui canal direto claro"}, {hasSite ? "tem site identificado" : "não possui site identificado"} e {reviewsCount > 0 ? `tem ${reviewsCount} avaliação(ões) como prova social` : "não possui prova social suficiente"}. A prioridade ficou {priorityLevel.label.toLowerCase()} porque os sinais digitais indicam {priorityLevel.description.toLowerCase()}
-            </p>
+          <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">{pitch}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {hasWhatsapp ? <Pill tone="emerald">WhatsApp pronto</Pill> : <Pill tone="orange">Contato a validar</Pill>}
+            {activeOffer?.name ? <Pill tone="emerald">Oferta conectada</Pill> : <Pill tone="orange">Oferta pendente</Pill>}
+            {primarySocial ? <Pill tone="pink">Rede validável</Pill> : null}
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-black uppercase tracking-wide text-white"><Brain className="h-5 w-5 text-cyan-300" /> Diagnóstico IA por oferta</h2>
-            <button onClick={analyzeLead} disabled={analyzing} className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 font-black text-cyan-100 transition-all hover:-translate-y-0.5 hover:bg-cyan-400/15 disabled:opacity-60">
-              <RefreshCw className={`h-4 w-4 ${analyzing ? "animate-spin" : ""}`} /> {analyzing ? "Analisando..." : intelligence ? "Reanalisar com IA" : "Analisar com IA"}
-            </button>
+      <section className="rounded-3xl border border-pink-400/20 bg-[#070812]/90 p-5 backdrop-blur-xl">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-pink-300"><Instagram className="h-4 w-4" /> Presença online</p>
+            <h2 className="mt-2 text-2xl font-black text-white">Redes sociais do lead</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">{socialPositioning}</p>
           </div>
+          <div className="rounded-2xl border border-pink-400/20 bg-pink-400/[0.08] px-5 py-3 text-right">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Localizadas</p>
+            <p className="text-2xl font-black text-white">{socialCoverage}%</p>
+            <p className="text-xs text-slate-400">{foundBusinessSocialProfiles.length}/{businessSocialProfiles.length} redes</p>
+          </div>
+        </div>
 
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {businessSocialProfiles.map((profile) => (
+            <div key={profile.network} className={`rounded-2xl border p-4 ${profile.found ? "border-emerald-400/20 bg-emerald-400/[0.06]" : "border-white/10 bg-white/[0.035]"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">{profile.label}</p>
+                  <p className="mt-1 truncate text-base font-black text-white">{profile.found ? (profile.username ? `@${String(profile.username).replace("@", "")}` : "Encontrado") : "Não confirmado"}</p>
+                  {profile.followers ? <p className="mt-1 text-xs text-slate-400">{formatNumber(profile.followers)} seguidores</p> : null}
+                </div>
+                {profile.found ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-300" /> : <AlertTriangle className="h-5 w-5 shrink-0 text-orange-300" />}
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <a href={profile.url || buildSocialSearchUrl(leadName, getLeadCity(lead), profile.label)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] px-2 py-2 text-xs font-black text-white hover:border-pink-400/30">
+                  {profile.found ? "Abrir" : "Buscar"} <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+                <button onClick={() => copyText(profile.url || buildSocialSearchUrl(leadName, getLeadCity(lead), profile.label))} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-black/20 px-2 py-2 text-xs font-black text-slate-200 hover:border-cyan-400/30">
+                  Copiar <Copy className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.055] p-4 text-sm leading-relaxed text-slate-300">
+          <p className="font-black text-cyan-100">Como usar sem poluir a venda</p>
+          <p className="mt-2">{socialOpportunityText}</p>
+          <p className="mt-2 text-xs text-slate-500">{socialOfferFitText}</p>
+        </div>
+      </section>
+
+      <details className="group rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
+        <summary className="cursor-pointer list-none font-black text-white flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2"><Brain className="h-5 w-5 text-cyan-300" /> Ver diagnóstico completo da IA</span>
+          <span className="text-xs text-slate-400 group-open:hidden">Expandir</span><span className="hidden text-xs text-slate-400 group-open:inline">Recolher</span>
+        </summary>
+        <div className="mt-5 space-y-4">
           <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] p-4">
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Pill tone="cyan">Confiança da análise: {analysisConfidence}%</Pill>
-              <Pill tone={priorityLevel.tone}>Prioridade: {priorityLevel.label}</Pill>
-              <Pill tone={intentLevel.tone}>Intenção observável: {intentLevel.label}</Pill>
+              <Pill tone="cyan">Confiança {analysisConfidence}%</Pill>
+              <Pill tone={priorityLevel.tone}>Prioridade {priorityLevel.label}</Pill>
+              <Pill tone={intentLevel.tone}>Intenção {intentLevel.label}</Pill>
             </div>
             <p className="text-sm leading-relaxed text-slate-300">{reason}</p>
           </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <InsightList title="Oportunidades" icon={<Sparkles className="h-4 w-4" />} items={finalOpportunities} empty="Aguardando análise da IA." tone="emerald" />
-            <InsightList title="Riscos/Pontos ausentes" icon={<AlertTriangle className="h-4 w-4" />} items={finalMissing} empty="Nenhum ponto crítico identificado." tone="orange" />
-            <InsightList title="Objeções prováveis" icon={<ShieldCheck className="h-4 w-4" />} items={finalObjections} empty="Sem objeções mapeadas ainda." tone="pink" />
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><Lightbulb className="h-5 w-5 text-orange-300" /> Próxima melhor ação</h2>
-          <div className="rounded-2xl border border-orange-400/20 bg-orange-400/10 p-4 text-sm text-slate-200">{nextAction}</div>
-
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold text-slate-400">Data</label>
-              <input type="date" value={followupDate} min={todayDate()} onChange={(e) => setFollowupDate(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40" />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-400">Hora</label>
-              <input type="time" value={followupTime} onChange={(e) => setFollowupTime(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40" />
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <label className="text-xs font-bold text-slate-400">Canal</label>
-            <select value={followupChannel} onChange={(e) => setFollowupChannel(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40">
-              {FOLLOWUP_CHANNELS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </div>
-
-          <button onClick={createFollowup} disabled={creatingFollowup} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-black text-emerald-100 transition-all hover:-translate-y-0.5 hover:bg-emerald-400/20 disabled:opacity-60">
-            <CalendarPlus className="h-4 w-4" /> {creatingFollowup ? "Criando..." : "Criar follow-up recomendado"}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-black uppercase tracking-wide"><Send className="h-5 w-5 text-emerald-300" /> Abordagem personalizada</h2>
-            <button onClick={() => copyText(pitch)} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-black text-slate-200 hover:border-cyan-400/30"><Copy className="h-4 w-4" /> Copiar</button>
-          </div>
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">{pitch}</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Pill tone="slate">Gerado por segmento</Pill>
-            {hasReviewsSignal ? <Pill tone="slate">Avaliações públicas</Pill> : null}
-            {hasSite ? <Pill tone="slate">Site analisado</Pill> : null}
-            {hasInstagram ? <Pill tone="slate">Presença social</Pill> : null}
-            {activeOffer?.name ? <Pill tone="emerald">Oferta conectada</Pill> : <Pill tone="orange">Oferta pendente</Pill>}
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><ClipboardList className="h-5 w-5 text-cyan-300" /> Oferta usada na análise</h2>
-          {activeOffer?.name ? (
-            <div className="space-y-3 text-sm">
-              <div><p className="text-xs font-black uppercase text-slate-500">Nome</p><p className="font-bold text-white">{activeOffer.name}</p></div>
-              {activeOffer.description ? <div><p className="text-xs font-black uppercase text-slate-500">Descrição</p><p className="text-slate-300">{activeOffer.description}</p></div> : null}
-              {activeOffer.ideal_customer ? <div><p className="text-xs font-black uppercase text-slate-500">ICP</p><p className="text-slate-300">{activeOffer.ideal_customer}</p></div> : null}
-              {activeOffer.price ? <Pill tone="emerald">Preço: {String(activeOffer.price)}</Pill> : null}
-            </div>
-          ) : (
-            <EmptyState text="Cadastre uma oferta na Busca Inteligente para a IA avaliar exatamente o encaixe entre seu produto e este lead." />
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-3xl border border-pink-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl lg:col-span-2">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><ShieldCheck className="h-5 w-5 text-pink-300" /> Objeções previstas e respostas</h2>
           <div className="grid gap-3 md:grid-cols-3">
-            <ObjectionCard title={finalObjections[0] || "Já faço manualmente"} answer="Responda mostrando economia de tempo, menos perda de contatos e organização do histórico comercial. Foque no custo oculto do atendimento manual." />
-            <ObjectionCard title={finalObjections[1] || "Está caro"} answer={`Use o ROI: se gerar apenas ${roiClients} novos clientes/mês, a receita adicional estimada pode chegar a ${moneyBRL(possibleExtraRevenue)}.`} />
-            <ObjectionCard title={finalObjections[2] || "Preciso pensar"} answer="Crie um follow-up curto, envie demonstração simples e pergunte qual etapa do processo comercial mais trava hoje." />
+            <InsightList title="Oportunidades" icon={<Sparkles className="h-4 w-4" />} items={finalOpportunities.slice(0, 4)} empty="Aguardando análise da IA." tone="emerald" />
+            <InsightList title="Pontos para validar" icon={<AlertTriangle className="h-4 w-4" />} items={finalMissing.slice(0, 4)} empty="Nenhum ponto crítico identificado." tone="orange" />
+            <InsightList title="Objeções prováveis" icon={<ShieldCheck className="h-4 w-4" />} items={finalObjections.slice(0, 4)} empty="Sem objeções mapeadas ainda." tone="pink" />
           </div>
         </div>
+      </details>
 
-        <div className="rounded-3xl border border-cyan-400/15 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><Target className="h-5 w-5 text-cyan-300" /> Playbook de ataque</h2>
-          <div className="space-y-3 text-sm text-slate-300">
-            <p><span className="font-black text-white">1.</span> Abrir pelo problema mais provável: atendimento, agenda, follow-up ou captação.</p>
-            <p><span className="font-black text-white">2.</span> Usar prova observável: site, avaliações, ausência de Instagram/agendamento ou baixa mensuração.</p>
-            <p><span className="font-black text-white">3.</span> Conectar com a oferta: {activeOffer?.name || "cadastre uma oferta para personalizar esta etapa"}.</p>
-            <p><span className="font-black text-white">4.</span> Finalizar com pergunta leve: “Hoje vocês perdem muitos contatos por demora no atendimento?”</p>
+      <details className="group rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
+        <summary className="cursor-pointer list-none font-black text-white flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-orange-300" /> Ver dados, projeção e CRM</span>
+          <span className="text-xs text-slate-400 group-open:hidden">Expandir</span><span className="hidden text-xs text-slate-400 group-open:inline">Recolher</span>
+        </summary>
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+            <h3 className="mb-4 font-black text-white">Informações principais</h3>
+            <div className="space-y-3 text-sm text-slate-300">
+              <p className="flex items-center gap-2"><Phone className="h-4 w-4 text-cyan-400" /> {leadPhone || "Telefone não informado"}</p>
+              <p className="flex items-center gap-2"><MapPin className="h-4 w-4 text-cyan-400" /> {getLeadAddress(lead)}</p>
+              <p className="flex items-center gap-2"><Star className="h-4 w-4 text-yellow-400" /> {lead.rating || "Sem avaliação"} {lead.user_ratings_total ? `• ${lead.user_ratings_total} avaliações` : ""}</p>
+              <p className="flex items-center gap-2 break-all"><Globe className="h-4 w-4 shrink-0 text-cyan-400" /> {websiteUrl ? <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-cyan-200 hover:underline">{leadWebsite}</a> : "Site não informado"}</p>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {instagramProfile ? (
-        <div className="rounded-3xl border border-pink-400/20 bg-[#070711]/80 p-5 backdrop-blur-xl">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 font-black uppercase tracking-wide"><Instagram className="h-5 w-5 text-pink-300" /> Social Intelligence</h2>
-            {instagramUrl ? <a href={instagramUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-black text-pink-200">Abrir Instagram <ExternalLink className="h-3.5 w-3.5" /></a> : null}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+            <h3 className="mb-4 font-black text-white">Projeção simples</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DetailRow label="Potencial" value={hasFinancialProjection ? moneyBRL(expectedRevenue) : potential} hint="Estimativa, não promessa" />
+              <DetailRow label="LTV 12 meses" value={hasFinancialProjection ? moneyBRL(estimatedLtv) : "Não estimado"} hint="Com base na oferta" />
+            </div>
           </div>
-          <div className="grid gap-5 lg:grid-cols-[1fr_1.6fr]">
-            <div className="flex items-start gap-4">
-              {instagramProfile.profile_pic_url ? <img src={instagramProfile.profile_pic_url} alt={instagramProfile.username || "Instagram"} className="h-20 w-20 rounded-full border-2 border-pink-400/50 object-cover" /> : <div className="flex h-20 w-20 items-center justify-center rounded-full border border-pink-400/40 bg-pink-400/10"><Instagram className="h-8 w-8 text-pink-300" /></div>}
-              <div className="min-w-0">
-                <h3 className="break-all text-2xl font-black text-white">@{instagramProfile.username || "perfil"}</h3>
-                <p className="text-sm text-slate-400">{instagramProfile.full_name || "Nome não informado"}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {instagramProfile.is_verified ? <Pill tone="pink"><BadgeCheck className="h-3 w-3" /> Verificado</Pill> : null}
-                  {instagramProfile.is_business_account ? <Pill tone="cyan"><Building2 className="h-3 w-3" /> Comercial</Pill> : null}
-                  <Pill tone="slate"><Activity className="h-3 w-3" /> Analisado</Pill>
-                </div>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 xl:col-span-2">
+            <h3 className="mb-4 font-black text-white">CRM do lead</h3>
+            <div className="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
+              <div>
+                <label className="text-xs font-bold text-slate-400">Status</label>
+                <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40">
+                  {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-400">Observações</label>
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ex: falou pelo WhatsApp, pediu proposta, retornar amanhã..." className="mt-1 min-h-24 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40" />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <MetricCard icon={<Users className="h-5 w-5" />} label="Seguidores" value={formatNumber(instagramProfile.followers)} hint="Audiência" tone="purple" />
-              <MetricCard icon={<Users className="h-5 w-5" />} label="Seguindo" value={formatNumber(instagramProfile.following)} hint="Conexões" tone="orange" />
-              <MetricCard icon={<BarChart3 className="h-5 w-5" />} label="Posts" value={formatNumber(instagramProfile.posts_count)} hint="Publicações" tone="emerald" />
-            </div>
+            <button onClick={saveLead} disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/15 px-4 py-3 font-black text-cyan-100 transition-all hover:-translate-y-0.5 hover:bg-cyan-400/20 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar CRM"}</button>
           </div>
         </div>
-      ) : null}
+      </details>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><FileText className="h-5 w-5 text-cyan-300" /> Informações principais</h2>
-          <div className="space-y-3 text-sm text-slate-300">
-            <p className="flex items-center gap-2"><Phone className="h-4 w-4 text-cyan-400" /> {leadPhone || "Telefone não informado"}</p>
-            <p className="flex items-center gap-2"><MapPin className="h-4 w-4 text-cyan-400" /> {getLeadAddress(lead)}</p>
-            <p className="flex items-center gap-2"><Star className="h-4 w-4 text-yellow-400" /> {lead.rating || "Sem avaliação"} {lead.user_ratings_total ? `• ${lead.user_ratings_total} avaliações` : ""}</p>
-            <p className="flex items-center gap-2 break-all"><Globe className="h-4 w-4 shrink-0 text-cyan-400" /> {websiteUrl ? <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-cyan-200 hover:underline">{leadWebsite}</a> : "Site não informado"}</p>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-          <h2 className="mb-4 flex items-center gap-2 font-black uppercase tracking-wide"><Zap className="h-5 w-5 text-orange-300" /> Sinais digitais</h2>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <BooleanSignal value={hasSite} label="Possui site" />
-            <BooleanSignal value={hasWhatsapp} label="WhatsApp/Telefone" />
-            <BooleanSignal value={hasInstagram} label="Instagram" />
-            <BooleanSignal value={hasOnlineScheduling} label="Agendamento online" />
-            <BooleanSignal value={hasPixel} label="Meta Pixel" />
-            <BooleanSignal value={hasAnalytics} label="Analytics/Tag" />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-white/10 bg-[#070b12]/80 p-5 backdrop-blur-xl">
-        <h2 className="mb-4 font-black uppercase tracking-wide">CRM do Lead</h2>
-        <div className="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
-          <div>
-            <label className="text-xs font-bold text-slate-400">Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40">
-              {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-400">Observações</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ex: falou pelo WhatsApp, pediu proposta, retornar amanhã..." className="mt-1 min-h-24 w-full rounded-xl border border-white/10 bg-[#050914] px-3 py-2 text-sm outline-none focus:border-cyan-400/40" />
-          </div>
-        </div>
-      </div>
-
-      <div className="fixed bottom-4 left-4 right-4 z-20 mx-auto grid max-w-6xl gap-3 rounded-2xl border border-white/10 bg-[#060a12]/95 p-3 shadow-[0_10px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl md:grid-cols-5">
+      <div className="fixed bottom-4 left-4 right-4 z-20 mx-auto grid max-w-7xl gap-3 rounded-2xl border border-white/10 bg-[#060a12]/95 p-3 shadow-[0_10px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl md:grid-cols-5">
         {whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/15 px-4 py-3 font-black text-emerald-100 transition-all hover:-translate-y-0.5 hover:bg-emerald-400/20"><MessageCircle className="h-4 w-4" /> WhatsApp</a> : <button disabled className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-black text-slate-500">Sem WhatsApp</button>}
-        {leadPhone ? <a href={`tel:${leadPhone}`} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-black text-slate-200 transition-all hover:-translate-y-0.5 hover:border-cyan-400/30"><Phone className="h-4 w-4" /> Ligar</a> : <button disabled className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-black text-slate-500">Sem telefone</button>}
         {websiteUrl ? <a href={websiteUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-black text-slate-200 transition-all hover:-translate-y-0.5 hover:border-blue-400/30"><Globe className="h-4 w-4" /> Site</a> : <button disabled className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-black text-slate-500">Sem site</button>}
+        <a href={primarySocial?.url || socialSearchUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-xl border border-pink-400/25 bg-pink-400/10 px-4 py-3 font-black text-pink-100 transition-all hover:-translate-y-0.5 hover:bg-pink-400/20"><Instagram className="h-4 w-4" /> Redes</a>
         <button onClick={() => copyText(pitch)} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-black text-slate-200 transition-all hover:-translate-y-0.5 hover:border-pink-400/30"><Copy className="h-4 w-4" /> Copiar pitch</button>
-        <button onClick={saveLead} disabled={saving} className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/15 px-4 py-3 font-black text-cyan-100 transition-all hover:-translate-y-0.5 hover:bg-cyan-400/20 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar CRM"}</button>
+        <button onClick={createFollowup} disabled={creatingFollowup} className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/15 px-4 py-3 font-black text-cyan-100 transition-all hover:-translate-y-0.5 hover:bg-cyan-400/20 disabled:opacity-60"><CalendarPlus className="h-4 w-4" /> {creatingFollowup ? "Criando..." : "Follow-up"}</button>
       </div>
     </div>
   );
+
 }
 
 export default LeadProfile;

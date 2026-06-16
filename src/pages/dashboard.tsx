@@ -1181,33 +1181,28 @@ export function Dashboard() {
   ];
 
   return (
-    <div className={`nxa-dashboard-shell nxa-theme-${visualTheme} space-y-6 pb-10`} style={DASHBOARD_THEMES[visualTheme]}>
+    <div className={`nxa-dashboard-shell nxa-theme-${visualTheme} space-y-5 pb-10`} style={DASHBOARD_THEMES[visualTheme]}>
       <DashboardThemeStyle />
       <div className="nxa-hardware-line" />
+
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <p className="text-sm text-muted-foreground">NXA Growth Engine</p>
-          <h1 className="text-2xl font-black tracking-tight">Command Center Comercial</h1>
+          <h1 className="text-2xl font-black tracking-tight">Dashboard Comercial</h1>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Badge variant="outline">Fonte: {source}</Badge>
-          <Badge variant="outline">Sync: {lastSync}</Badge>
+          <Badge variant="outline" className="bg-background/40">{source}</Badge>
+          <Badge variant="outline" className="bg-background/40">Sync {lastSync}</Badge>
           <Button onClick={loadDashboardData} disabled={loading} variant="outline" className="bg-background/50">
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Atualizar
           </Button>
-          <Link href="/busca"><Button className="bg-gradient-to-r from-cyan-600 to-violet-600 text-white shadow-[0_14px_34px_rgba(8,145,178,0.24)] hover:scale-[1.02] transition-transform">Nova busca IA<Search className="h-4 w-4 ml-2" /></Button></Link>
+          <Link href="/busca">
+            <Button className="bg-gradient-to-r from-cyan-600 to-violet-600 text-white shadow-[0_14px_34px_rgba(8,145,178,0.24)]">
+              Nova busca<Search className="h-4 w-4 ml-2" />
+            </Button>
+          </Link>
         </div>
       </div>
-
-      <CopilotPanel
-        bestLead={bestLead}
-        hotLeads={hotLeads}
-        overdueFollowups={overdueFollowups}
-        expectedMRR={expectedMRR}
-        bestSegment={bestSegment}
-        bestCity={bestCity}
-        bestAction={bestAction}
-      />
 
       {errorMessage && (
         <Card className="bg-red-500/10 border-red-500/20">
@@ -1218,190 +1213,208 @@ export function Dashboard() {
         </Card>
       )}
 
-      <CopilotIntelligenceCard insight={aiInsight} loading={aiLoading} bestLead={bestLead} />
+      <Card className="nxa-hero-panel overflow-hidden rounded-3xl border-primary/20 bg-[radial-gradient(circle_at_8%_0%,rgba(0,255,255,0.16),transparent_32%),radial-gradient(circle_at_92%_0%,rgba(124,58,237,0.14),transparent_34%),linear-gradient(135deg,rgba(2,6,23,0.78),rgba(15,23,42,0.52))]">
+        <CardContent className="p-5 lg:p-7">
+          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr] items-stretch">
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-500/20"><Bot className="h-3.5 w-3.5 mr-1" /> NXA Copilot</Badge>
+                <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20"><ShieldCheck className="h-3.5 w-3.5 mr-1" /> Tela enxuta</Badge>
+              </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {compactKpis.map((item) => (
-          <KpiCard key={item.label} label={item.label} value={item.value} helper={item.helper} icon={item.icon} tone={item.tone} />
-        ))}
-      </div>
+              <div>
+                <h2 className="text-3xl lg:text-5xl font-black tracking-tight leading-tight max-w-4xl">
+                  {totalLeads > 0 ? `${hotLeads || Math.max(1, Math.round(warmLeads * 0.35))} oportunidades merecem sua atenção hoje.` : "Faça sua primeira busca e deixe a IA apontar o melhor caminho."}
+                </h2>
+                <p className="text-muted-foreground mt-4 text-sm lg:text-base max-w-3xl leading-relaxed">
+                  O dashboard agora mostra somente o essencial. A análise pesada continua rodando por trás para escolher o lead certo, a próxima ação e o potencial financeiro.
+                </p>
+              </div>
 
-      <CollapsiblePanel
-        id="operations"
-        title="Detalhes da operação"
-        subtitle="Indicadores secundários recolhidos para manter o dashboard limpo"
-        icon={<Layers3 className="h-5 w-5" />}
-        open={expandedPanels.operations}
-        onToggle={togglePanel}
-        preview={<div className="grid gap-3 md:grid-cols-4"><ProgressRow label="Leads quentes" value={hotLeads} total={totalLeads} badge="80+" /><ProgressRow label="Qualidade" value={dataQuality} total={100} badge={`${dataQuality}%`} /><ProgressRow label="Follow-ups" value={pendingFollowups} total={Math.max(pendingFollowups + 1, 1)} badge={`${pendingFollowups}`} /><ProgressRow label="Agenda hoje" value={appointmentsToday} total={Math.max(appointmentsToday + 1, 1)} badge={`${appointmentsToday}`} /></div>}
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard label="Leads quentes" value={numberFormat(hotLeads)} helper="Score comercial acima de 80" icon={<Flame className="h-5 w-5" />} tone="orange" />
-          <KpiCard label="Qualidade de dados" value={`${dataQuality}%`} helper="Score + contato + presença digital" icon={<Database className="h-5 w-5" />} tone="purple" />
-          <KpiCard label="Follow-ups abertos" value={numberFormat(pendingFollowups)} helper={`${overdueFollowups} atrasado(s)`} icon={<Clock className="h-5 w-5" />} tone={overdueFollowups > 0 ? "red" : "primary"} />
-          <KpiCard label="Agenda de hoje" value={numberFormat(appointmentsToday)} helper="Compromissos identificados" icon={<Activity className="h-5 w-5" />} tone="blue" />
-        </div>
-      </CollapsiblePanel>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-border bg-background/45 p-4">
+                  <p className="text-xs text-muted-foreground">Leads na carteira</p>
+                  <p className="text-3xl font-black mt-1">{numberFormat(totalLeads)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">{newToday} novo(s) hoje</p>
+                </div>
+                <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
+                  <p className="text-xs text-muted-foreground">Prioridade agora</p>
+                  <p className="text-3xl font-black text-orange-300 mt-1">{numberFormat(hotLeads)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">score acima de 80</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-muted-foreground">Potencial estimado</p>
+                  <p className="text-3xl font-black text-emerald-300 mt-1">{moneyFormat(expectedMRR)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">baseado na sua oferta</p>
+                </div>
+                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                  <p className="text-xs text-muted-foreground">Contatos prontos</p>
+                  <p className="text-3xl font-black text-cyan-300 mt-1">{contactsReady}%</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">{leadsWithPhone} com WhatsApp</p>
+                </div>
+              </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <CollapsiblePanel
-          id="opportunities"
-          title="Oportunidades que o Copilot recomenda atacar"
-          subtitle="Priorização por score, contato, presença digital e fit comercial"
-          icon={<Flame className="h-5 w-5" />}
-          open={expandedPanels.opportunities}
-          onToggle={togglePanel}
-          action={<Link href="/leads"><Button size="sm" variant="outline">Ver todas</Button></Link>}
-          preview={bestLead ? <div className="rounded-2xl border border-primary/20 bg-background/40 p-4 flex items-center justify-between gap-3"><div><p className="text-xs text-muted-foreground">Melhor oportunidade agora</p><p className="font-black truncate">{getLeadName(bestLead)}</p></div><Badge className="bg-orange-500/10 text-orange-300 border-orange-500/20">Score {getScore(bestLead)}</Badge></div> : undefined}
-        >
-          <div className="space-y-3">
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  size="lg"
+                  className="bg-gradient-to-r from-cyan-600 to-blue-600 text-white"
+                  onClick={() => bestLead ? openWhatsApp(bestLead) : navigate('/busca')}
+                >
+                  {bestLead ? "Começar pelo melhor lead" : "Criar primeira busca"}
+                  <ArrowUpRight className="h-4 w-4 ml-2" />
+                </Button>
+                <Button size="lg" variant="outline" className="bg-background/50" onClick={() => bestLead ? openLead(bestLead) : navigate('/leads')}>
+                  Ver oportunidade
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-primary/20 bg-background/50 p-5 flex flex-col justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Lead recomendado</p>
+                <div className="mt-4 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-2xl font-black truncate">{bestLead ? getLeadName(bestLead) : "Nenhum lead ainda"}</p>
+                    <p className="text-sm text-muted-foreground mt-1 truncate">{bestLead ? `${getLeadCity(bestLead)} / ${getLeadState(bestLead)} • ${getLeadSegment(bestLead)}` : "Execute uma busca inteligente"}</p>
+                  </div>
+                  <div className="h-16 w-16 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-300 flex items-center justify-center font-black text-xl shrink-0">
+                    {bestLead ? getScore(bestLead) : "—"}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-2">
+                  <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center gap-3">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300 shrink-0" />
+                    <span className="text-sm text-muted-foreground">{bestLead && getLeadPhone(bestLead) ? "WhatsApp encontrado para abordagem imediata." : "A IA ainda precisa de leads com contato validado."}</span>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center gap-3">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300 shrink-0" />
+                    <span className="text-sm text-muted-foreground">{bestLead && getLeadWebsite(bestLead) ? "Presença digital detectada para personalizar o pitch." : "Use a busca/enriquecimento para encontrar sinais digitais."}</span>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-background/40 p-3 flex items-center gap-3">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300 shrink-0" />
+                    <span className="text-sm text-muted-foreground">Próxima ação definida automaticamente pelo Copilot.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-2">
+                <Button className="w-full" onClick={() => bestLead ? openWhatsApp(bestLead) : navigate('/busca')}>{bestLead ? "Abrir WhatsApp" : "Nova busca"}</Button>
+                <Button variant="outline" className="w-full bg-background/50" onClick={() => bestLead ? openLead(bestLead) : navigate('/leads')}>Abrir perfil do lead</Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_0.85fr]">
+        <Card id="dashboard-opportunities" className="bg-card/55 backdrop-blur-xl border-card-border rounded-3xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <SectionTitle
+              icon={<Flame className="h-5 w-5" />}
+              title="A IA recomenda atacar agora"
+              subtitle="Sem poluição: apenas as melhores oportunidades da carteira."
+              action={<Link href="/leads"><Button size="sm" variant="outline" className="bg-background/50">Ver todas</Button></Link>}
+            />
+          </CardHeader>
+          <CardContent className="space-y-3">
             {topLeads.length === 0 && (
               <div className="rounded-3xl border border-border p-8 text-center bg-background/40">
                 <Target className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-                <p className="font-black">Nenhuma oportunidade ainda.</p>
-                <p className="text-sm text-muted-foreground mt-1">Execute uma busca inteligente para alimentar o Copilot.</p>
-                <Link href="/busca"><Button className="mt-4">Criar busca agora</Button></Link>
+                <p className="font-black">Sua carteira ainda está vazia.</p>
+                <p className="text-sm text-muted-foreground mt-1">Faça uma busca para a NXA priorizar os melhores leads.</p>
+                <Link href="/busca"><Button className="mt-4">Buscar leads agora</Button></Link>
               </div>
             )}
-            {topLeads.slice(0, expandedPanels.opportunities ? 5 : 1).map((lead, index) => <OpportunityCard key={lead.id || lead.business_id || index} lead={lead} index={index} />)}
-          </div>
-        </CollapsiblePanel>
-
-        <CollapsiblePanel
-          id="mission"
-          title="Missão do dia"
-          subtitle="Onboarding prático para o cliente saber exatamente o que fazer"
-          icon={<Sparkles className="h-5 w-5" />}
-          open={expandedPanels.mission}
-          onToggle={togglePanel}
-          preview={<div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 flex items-center justify-between"><span className="font-black">Progresso {missionProgress}%</span><Badge>{missionDone}/{mission.length}</Badge></div>}
-        >
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-primary/20 bg-primary/5 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Progresso comercial</p>
-                  <p className="text-3xl font-black mt-1">{missionProgress}%</p>
-                </div>
-                <div className="h-16 w-16 rounded-2xl border border-primary/20 bg-primary/10 text-primary flex items-center justify-center font-black">{missionDone}/{mission.length}</div>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden mt-4"><div className="h-full bg-gradient-to-r from-primary to-emerald-400" style={{ width: `${missionProgress}%` }} /></div>
-            </div>
-            {mission.map((item) => <MissionItem key={item.label} done={item.done} label={item.label} />)}
-            <Button variant="outline" className="w-full bg-background/50" onClick={() => { const el = document.getElementById("dashboard-opportunities"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); else navigate("/leads"); }}>Começar pelo próximo passo<ChevronRight className="h-4 w-4 ml-2" /></Button>
-          </div>
-        </CollapsiblePanel>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <CollapsiblePanel
-            id="market"
-            title="Mercado em tempo real"
-            subtitle="Nicho, força comercial e potencial financeiro da sua base"
-            icon={<Radar className="h-5 w-5" />}
-            open={expandedPanels.market}
-            onToggle={togglePanel}
-            preview={<div className="grid gap-3 md:grid-cols-3">{marketSignals.slice(0, 3).map((item) => <ProgressRow key={item.label} label={item.label} value={item.avg} total={100} badge={`${item.avg}%`} />)}</div>}
-          >
-            <div className="space-y-3">
-              {marketSignals.length === 0 && <p className="text-sm text-muted-foreground">Sem segmentos suficientes para análise.</p>}
-              {marketSignals.map((item) => (
-                <div key={item.label} className="rounded-3xl border border-border bg-background/40 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="font-black truncate">{item.label}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{item.value} leads • {item.hot} quentes • score médio {item.avg}</p>
-                      <Badge className="mt-3 bg-primary/10 text-primary border-primary/20">{item.priority}</Badge>
+            {topLeads.slice(0, 3).map((lead, index) => (
+              <div key={lead.id || lead.business_id || index} className="rounded-3xl border border-border bg-background/40 p-4 hover:border-primary/30 transition-all">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className="bg-primary/10 text-primary border-primary/20">#{index + 1}</Badge>
+                      <p className="font-black text-lg truncate">{getLeadName(lead)}</p>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs text-muted-foreground">Pipeline</p>
-                      <p className="font-black text-emerald-300">{moneyFormat(item.revenue)}</p>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">{getLeadCity(lead)} / {getLeadState(lead)} • {getLeadSegment(lead)}</p>
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      <Badge className={getLeadPhone(lead) ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" : "bg-orange-500/10 text-orange-300 border-orange-500/20"}>{getLeadPhone(lead) ? "WhatsApp pronto" : "Precisa enriquecer"}</Badge>
+                      <Badge className={getLeadWebsite(lead) ? "bg-blue-500/10 text-blue-300 border-blue-500/20" : "bg-muted text-muted-foreground border-border"}>{getLeadWebsite(lead) ? "Site detectado" : "Sem site"}</Badge>
+                      {Number(lead?.rating || 0) > 0 && <Badge variant="outline"><Star className="h-3 w-3 mr-1" />{Number(lead?.rating || 0).toFixed(1)}</Badge>}
                     </div>
+                    <p className="text-sm text-muted-foreground mt-4">Ação sugerida: {getLeadPhone(lead) ? "enviar abordagem consultiva pelo WhatsApp." : "encontrar contato antes de vender."}</p>
                   </div>
-                  <div className="mt-3"><ProgressRow label="Força do segmento" value={item.avg} total={100} badge={`${item.avg}%`} /></div>
+                  <div className="h-16 w-16 rounded-2xl bg-orange-500/10 text-orange-300 border border-orange-500/20 flex items-center justify-center font-black text-xl shrink-0">{getScore(lead)}</div>
                 </div>
-              ))}
-            </div>
-          </CollapsiblePanel>
-        </div>
+                <div className="mt-4 flex gap-2 flex-wrap">
+                  <Button size="sm" onClick={() => openWhatsApp(lead)} disabled={!getLeadPhone(lead)}>WhatsApp</Button>
+                  <Button size="sm" variant="outline" className="bg-background/50" onClick={() => openLead(lead)}>Ver perfil</Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
 
-        <CollapsiblePanel
-          id="traction"
-          title="Tração 7 dias"
-          subtitle="Leads capturados recentemente"
-          icon={<LineChart className="h-5 w-5" />}
-          open={expandedPanels.traction}
-          onToggle={togglePanel}
-          preview={<div className="grid gap-3"><ProgressRow label="Novos 7 dias" value={lastSevenDays.reduce((acc, item) => acc + item.value, 0)} total={Math.max(totalLeads, 1)} badge="7d" /><ProgressRow label="Mornos" value={warmLeads} total={totalLeads} badge="61-79" /></div>}
-        >
-          <MiniBarChart data={lastSevenDays} />
-          <div className="mt-5 space-y-3">
-            <ProgressRow label="Quentes" value={hotLeads} total={totalLeads} badge="80+" />
-            <ProgressRow label="Mornos" value={warmLeads} total={totalLeads} badge="61-79" />
-            <ProgressRow label="Frios" value={coldLeads} total={totalLeads} badge="0-60" />
-          </div>
-        </CollapsiblePanel>
+        <div className="space-y-5">
+          <Card className="nxa-intelligence-card rounded-3xl overflow-hidden">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shrink-0"><Bot className="h-5 w-5" /></div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-black">Decisão da IA</p>
+                    <Badge className="bg-primary/10 text-primary border-primary/20">{aiLoading ? "calculando" : `${aiInsight?.confidence || 0}%`}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{aiInsight?.executive}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-3xl border border-primary/20 bg-primary/5 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Próxima melhor ação</p>
+                <p className="font-black text-lg mt-2 leading-snug">{aiInsight?.action || bestAction}</p>
+                <p className="text-xs text-muted-foreground mt-3 leading-relaxed">{aiInsight?.reason}</p>
+              </div>
+
+              <Button className="w-full mt-4" onClick={() => bestLead ? openWhatsApp(bestLead) : navigate('/busca')}>
+                Executar recomendação<ArrowUpRight className="h-4 w-4 ml-2" />
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card/55 backdrop-blur-xl border-card-border rounded-3xl">
+            <CardHeader className="pb-3">
+              <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Missão do dia" subtitle="Checklist simples para o cliente agir." />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-3xl border border-primary/20 bg-primary/5 p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Progresso comercial</p>
+                    <p className="text-3xl font-black mt-1">{missionProgress}%</p>
+                  </div>
+                  <div className="h-14 w-14 rounded-2xl border border-primary/20 bg-primary/10 text-primary flex items-center justify-center font-black">{missionDone}/{mission.length}</div>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden mt-4"><div className="h-full bg-gradient-to-r from-primary to-emerald-400" style={{ width: `${missionProgress}%` }} /></div>
+              </div>
+              {mission.slice(0, 4).map((item) => <MissionItem key={item.label} done={item.done} label={item.label} />)}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      <CollapsiblePanel
-        id="reports"
-        title="Relatórios secundários"
-        subtitle="Histórico, praças, forecast e saúde da operação ficam recolhidos para não poluir a primeira visão"
-        icon={<BarChart3 className="h-5 w-5" />}
-        open={expandedPanels.reports}
-        onToggle={togglePanel}
-        preview={<div className="grid gap-3 md:grid-cols-3"><ProgressRow label="Buscas recentes" value={recentSearches.length} total={Math.max(totalSearches, 1)} badge={`${recentSearches.length}`} /><ProgressRow label="Praças" value={topCities.length} total={Math.max(topCities.length, 1)} badge={`${topCities.length}`} /><ProgressRow label="Forecast" value={expectedMRR} total={Math.max(estimatedRevenue, 1)} badge={moneyFormat(expectedMRR)} /></div>}
-      >
-      <div className="grid gap-4 xl:grid-cols-3">
-                <Card className="bg-card/55 backdrop-blur-xl border-card-border">
-                  <CardHeader><SectionTitle icon={<Search className="h-5 w-5" />} title="Central de varreduras" subtitle="Últimas buscas operacionais" /></CardHeader>
-                  <CardContent className="space-y-3">
-                    {recentSearches.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma busca recente encontrada.</p>}
-                    {recentSearches.map((item, index) => (
-                      <div key={item.id || index} className="rounded-2xl border border-border bg-background/40 p-4 flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="font-bold truncate">{getSearchTitle(item)}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{item.city || "—"} / {item.state || "—"} • {getSearchResultsCount(item)} resultado(s)</p>
-                        </div>
-                        <Badge variant="outline">{formatDate(item.created_at)}</Badge>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-        
-                <Card className="bg-card/55 backdrop-blur-xl border-card-border">
-                  <CardHeader><SectionTitle icon={<MapPin className="h-5 w-5" />} title="Praças prioritárias" subtitle="Onde concentrar prospecção" /></CardHeader>
-                  <CardContent className="space-y-3">
-                    {topCities.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma cidade encontrada.</p>}
-                    {topCities.map((item) => <ProgressRow key={item.label} label={item.label} value={item.value} total={totalLeads} />)}
-                  </CardContent>
-                </Card>
-        
-                <Card className="bg-card/55 backdrop-blur-xl border-card-border">
-                  <CardHeader><SectionTitle icon={<Wallet className="h-5 w-5" />} title="Forecast SaaS" subtitle="Valor potencial para venda" /></CardHeader>
-                  <CardContent className="grid gap-3">
-                    <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between"><span className="text-sm text-muted-foreground">Pipeline bruto</span><strong>{moneyFormat(estimatedRevenue)}</strong></div>
-                    <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between"><span className="text-sm text-muted-foreground">MRR esperado</span><strong>{moneyFormat(expectedMRR)}</strong></div>
-                    <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between"><span className="text-sm text-muted-foreground">ARR esperado</span><strong>{moneyFormat(expectedARR)}</strong></div>
-                    <div className="rounded-2xl border border-border bg-background/40 p-4 flex justify-between"><span className="text-sm text-muted-foreground">Ticket usado</span><strong>{moneyFormat(offerPrice)}</strong></div>
-                  </CardContent>
-                </Card>
-              </div>
-        
-              <Card className="bg-card/55 backdrop-blur-xl border-card-border">
-                <CardHeader><SectionTitle icon={<Database className="h-5 w-5" />} title="Saúde da operação" subtitle="Status das engrenagens comerciais da NXA" /></CardHeader>
-                <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <SystemPill label="Supabase" ok={source === "Supabase"} detail={source === "Supabase" ? "Banco respondendo em tempo real" : "Usando fallback/cache"} />
-                  <SystemPill label="Opportunity Engine" ok={totalLeads > 0} detail={totalLeads > 0 ? "Base analisada e priorizada" : "Aguardando primeira busca"} />
-                  <SystemPill label="Oferta IA" ok={Boolean(offer)} detail={offer ? "Oferta usada no forecast" : "Usando ticket padrão"} />
-                  <SystemPill label="Follow-up Center" ok={overdueFollowups === 0} detail={overdueFollowups > 0 ? `${overdueFollowups} atrasado(s)` : "Sem atrasos críticos"} />
-                  <SystemPill label="CRM" ok={true} detail="Pipeline pronto para conversão" />
-                  <SystemPill label="Presença digital" ok={websiteCoverage >= 50} detail={`${websiteCoverage}% da base com site detectado`} />
-                </CardContent>
-              </Card>
-        
-      </CollapsiblePanel>
+      <Card className="bg-card/55 backdrop-blur-xl border-card-border rounded-3xl">
+        <CardContent className="p-4 lg:p-5">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="font-black">Informações avançadas continuam disponíveis, mas fora da primeira visão.</p>
+              <p className="text-sm text-muted-foreground mt-1">Relatórios, mercado, tração, saúde da operação e histórico devem ficar nas páginas IA Insights, Leads, CRM e Relatórios.</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Link href="/insights"><Button variant="outline" className="bg-background/50">IA Insights</Button></Link>
+              <Link href="/crm"><Button variant="outline" className="bg-background/50">CRM</Button></Link>
+              <Link href="/leads"><Button variant="outline" className="bg-background/50">Leads</Button></Link>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="fixed bottom-5 right-5 z-40 hidden lg:block">
         <div className="rounded-2xl border border-primary/20 bg-background/90 backdrop-blur-xl shadow-[0_0_60px_rgba(0,255,255,0.14)] p-3 max-w-xs">
@@ -1416,6 +1429,7 @@ export function Dashboard() {
       </div>
     </div>
   );
+
 }
 
 export default Dashboard;

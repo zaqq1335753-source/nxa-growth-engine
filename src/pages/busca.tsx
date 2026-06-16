@@ -106,6 +106,19 @@ type Lead = {
   ai_interest_label?: string;
   ai_why_this_lead?: string;
   ai_best_channel?: string;
+  social_links?: Record<string, string>;
+  social_profiles?: Record<string, any>;
+  instagram_url?: string;
+  instagram_username?: string;
+  instagram_followers?: number;
+  instagram_bio?: string;
+  facebook_url?: string;
+  linkedin_url?: string;
+  tiktok_url?: string;
+  youtube_url?: string;
+  web_enrichment_status?: "pending" | "completed" | "failed" | "skipped";
+  web_enrichment_summary?: string;
+  web_enrichment_confidence?: number;
 };
 
 type Category = {
@@ -1084,10 +1097,173 @@ async function searchLeads(body: any): Promise<Lead[]> {
       google_reviews_count: reviews,
       score: baseScore > 0 ? baseScore : 70,
       status: "new",
+      social_links: item.social_links || item.socials || {},
+      instagram_url: item.instagram_url || item.social_links?.instagram || item.socials?.instagram || "",
+      facebook_url: item.facebook_url || item.social_links?.facebook || item.socials?.facebook || "",
+      linkedin_url: item.linkedin_url || item.social_links?.linkedin || item.socials?.linkedin || "",
+      tiktok_url: item.tiktok_url || item.social_links?.tiktok || item.socials?.tiktok || "",
+      youtube_url: item.youtube_url || item.social_links?.youtube || item.socials?.youtube || "",
       source: "google_places",
       real_data: true,
     } as Lead;
   });
+}
+
+
+function cleanSocialUrl(url?: string) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
+  if (value.startsWith("@")) return "";
+  return `https://${value.replace(/^\/+/, "")}`;
+}
+
+function getInstagramUsernameFromUrl(url?: string) {
+  const value = String(url || "").trim();
+  const match = value.match(/instagram\.com\/(?!p\/|reel\/|stories\/|explore\/)([A-Za-z0-9._]+)/i);
+  return match?.[1] || "";
+}
+
+function normalizeSocialEnrichment(raw: any, lead: Lead): Partial<Lead> {
+  const socialLinks = raw?.social_links || raw?.socials || raw?.links || raw?.profiles || {};
+  const instagramProfile = raw?.instagram_profile || raw?.instagram || raw?.profiles?.instagram || {};
+  const instagramUrl = cleanSocialUrl(
+    raw?.instagram_url || instagramProfile?.url || socialLinks?.instagram || socialLinks?.instagram_url
+  );
+  const facebookUrl = cleanSocialUrl(raw?.facebook_url || socialLinks?.facebook || socialLinks?.facebook_url);
+  const linkedinUrl = cleanSocialUrl(raw?.linkedin_url || socialLinks?.linkedin || socialLinks?.linkedin_url);
+  const tiktokUrl = cleanSocialUrl(raw?.tiktok_url || socialLinks?.tiktok || socialLinks?.tiktok_url);
+  const youtubeUrl = cleanSocialUrl(raw?.youtube_url || socialLinks?.youtube || socialLinks?.youtube_url);
+
+  const normalizedLinks = {
+    ...(lead.social_links || {}),
+    ...(instagramUrl ? { instagram: instagramUrl } : {}),
+    ...(facebookUrl ? { facebook: facebookUrl } : {}),
+    ...(linkedinUrl ? { linkedin: linkedinUrl } : {}),
+    ...(tiktokUrl ? { tiktok: tiktokUrl } : {}),
+    ...(youtubeUrl ? { youtube: youtubeUrl } : {}),
+  };
+
+  return {
+    social_links: normalizedLinks,
+    social_profiles: raw?.social_profiles || raw?.profiles || lead.social_profiles || {},
+    instagram_url: instagramUrl || lead.instagram_url || "",
+    instagram_username:
+      raw?.instagram_username ||
+      instagramProfile?.username ||
+      getInstagramUsernameFromUrl(instagramUrl) ||
+      lead.instagram_username ||
+      "",
+    instagram_followers: Number(raw?.instagram_followers || instagramProfile?.followers || instagramProfile?.followers_count || lead.instagram_followers || 0) || undefined,
+    instagram_bio: raw?.instagram_bio || instagramProfile?.bio || instagramProfile?.biography || lead.instagram_bio || "",
+    facebook_url: facebookUrl || lead.facebook_url || "",
+    linkedin_url: linkedinUrl || lead.linkedin_url || "",
+    tiktok_url: tiktokUrl || lead.tiktok_url || "",
+    youtube_url: youtubeUrl || lead.youtube_url || "",
+    web_enrichment_status: "completed",
+    web_enrichment_summary:
+      raw?.summary ||
+      raw?.web_enrichment_summary ||
+      (instagramUrl ? "Instagram encontrado na busca web." : Object.keys(normalizedLinks).length ? "Redes sociais encontradas na busca web." : "Busca web executada, mas sem redes confiáveis."),
+    web_enrichment_confidence: clamp(Number(raw?.confidence || raw?.web_enrichment_confidence || 0), 0, 100),
+  };
+}
+
+function buildWebEnrichmentQueries(lead: Lead) {
+  const base = [lead.name, lead.city, lead.state].filter(Boolean).join(" ");
+  const websiteHost = lead.website ? String(lead.website).replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "";
+  return [
+    `${base} Instagram`,
+    `${base} Facebook`,
+    `${base} LinkedIn`,
+    websiteHost ? `${websiteHost} redes sociais` : "",
+    `${base} site oficial redes sociais`,
+  ].filter(Boolean);
+}
+
+async function enrichLeadWithWeb(lead: Lead, searchBody: any): Promise<Lead> {
+  try {
+    const payload = {
+      lead: {
+        name: lead.name,
+        segment: lead.segment,
+        city: lead.city,
+        state: lead.state,
+        address: lead.address,
+        phone: lead.phone,
+        website: lead.website,
+        maps_url: lead.maps_url,
+        place_id: lead.place_id,
+      },
+      sales_offer: searchBody.sales_offer,
+      search_context: {
+        niche: searchBody.niche,
+        city: searchBody.city,
+        state: searchBody.state,
+        queries: searchBody.queries,
+      },
+      queries: buildWebEnrichmentQueries(lead),
+      requested_outputs: [
+        "instagram_url",
+        "instagram_username",
+        "instagram_followers",
+        "instagram_bio",
+        "facebook_url",
+        "linkedin_url",
+        "tiktok_url",
+        "youtube_url",
+        "social_links",
+        "social_profiles",
+      ],
+    };
+
+    const { data, error } = await supabase.functions.invoke("enrich-lead-web", { body: payload });
+
+    if (error) throw error;
+
+    const enrichment = data?.enrichment || data?.social_intelligence || data?.result || data || {};
+    return {
+      ...lead,
+      ...normalizeSocialEnrichment(enrichment, lead),
+    };
+  } catch (error) {
+    console.warn("Enriquecimento web não executado para lead:", lead.name, error);
+    return {
+      ...lead,
+      web_enrichment_status: "failed",
+      web_enrichment_summary: "Edge Function enrich-lead-web não respondeu. Configure Tavily/Serper/Apify na função para retornar redes sociais reais.",
+    };
+  }
+}
+
+async function enrichLeadsWithWeb(leads: Lead[], searchBody: any) {
+  const concurrency = 3;
+  const queue = [...leads];
+  const enriched: Lead[] = [];
+
+  async function worker() {
+    while (queue.length) {
+      const lead = queue.shift();
+      if (!lead) return;
+      const result = await enrichLeadWithWeb(lead, searchBody);
+      enriched.push(result);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, leads.length) }, worker));
+  const byId = new Map(enriched.map((lead) => [lead.id, lead]));
+  return leads.map((lead) => byId.get(lead.id) || lead);
+}
+
+function hasAnySocial(lead: Lead) {
+  return Boolean(
+    lead.instagram_url ||
+      lead.facebook_url ||
+      lead.linkedin_url ||
+      lead.tiktok_url ||
+      lead.youtube_url ||
+      Object.keys(lead.social_links || {}).length
+  );
 }
 
 function leadDedupKey(lead: Lead) {
@@ -1266,6 +1442,12 @@ function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
     "Endereco",
     "Telefone",
     "Site",
+    "Instagram",
+    "Facebook",
+    "LinkedIn",
+    "TikTok",
+    "YouTube",
+    "Status enriquecimento web",
     "Avaliacao",
     "Avaliacoes",
     "Score IA",
@@ -1284,6 +1466,12 @@ function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
     lead.address,
     lead.phone || "",
     lead.website || "",
+    lead.instagram_url || lead.social_links?.instagram || "",
+    lead.facebook_url || lead.social_links?.facebook || "",
+    lead.linkedin_url || lead.social_links?.linkedin || "",
+    lead.tiktok_url || lead.social_links?.tiktok || "",
+    lead.youtube_url || lead.social_links?.youtube || "",
+    lead.web_enrichment_status || "",
     lead.google_rating || "",
     lead.google_reviews_count || "",
     lead.ai_fit_score || lead.score || "",
@@ -1687,6 +1875,15 @@ export function Busca() {
         phone: lead.phone || null,
         website: lead.website || null,
         maps_url: lead.maps_url || null,
+        instagram_url: lead.instagram_url || lead.social_links?.instagram || null,
+        facebook_url: lead.facebook_url || lead.social_links?.facebook || null,
+        linkedin_url: lead.linkedin_url || lead.social_links?.linkedin || null,
+        tiktok_url: lead.tiktok_url || lead.social_links?.tiktok || null,
+        youtube_url: lead.youtube_url || lead.social_links?.youtube || null,
+        social_links: lead.social_links || null,
+        social_profiles: lead.social_profiles || null,
+        web_enrichment_status: lead.web_enrichment_status || null,
+        web_enrichment_summary: lead.web_enrichment_summary || null,
         google_rating: lead.google_rating || null,
         google_reviews_count: lead.google_reviews_count || null,
         rating: lead.google_rating || null,
@@ -1875,6 +2072,7 @@ export function Busca() {
       only_opportunity: onlyOpportunity,
       sales_offer: offer,
       ai_scoring: aiScoringEnabled,
+      web_enrichment: true,
     };
 
     try {
@@ -1893,9 +2091,14 @@ export function Busca() {
       // explicando o fit comercial.
       const qualifiedLeads = filteredLeads.length ? filteredLeads : dedupedLeads;
 
-      const leads = qualifiedLeads
+      const leadsBeforeWeb = qualifiedLeads
         .sort((a, b) => (b.ai_fit_score || b.score || 0) - (a.ai_fit_score || a.score || 0))
         .slice(0, quantity);
+
+      setEngineStage(4);
+      const leads = body.web_enrichment
+        ? await enrichLeadsWithWeb(leadsBeforeWeb, body)
+        : leadsBeforeWeb;
 
       const creditsUsed = mode === "custom" ? 0 : leads.length * CREDIT_COST_PER_LEAD;
 
@@ -3157,6 +3360,24 @@ function LeadCard({
           )}
         </div>
 
+        <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300">Social Intelligence</span>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-black", hasAnySocial(lead) ? "bg-emerald-400/10 text-emerald-300" : "bg-orange-400/10 text-orange-300")}>
+              {hasAnySocial(lead) ? "redes encontradas" : lead.web_enrichment_status === "failed" ? "configurar função" : "sem redes"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {lead.instagram_url || lead.social_links?.instagram ? <SocialChip label={lead.instagram_username ? `@${lead.instagram_username}` : "Instagram"} url={lead.instagram_url || lead.social_links?.instagram} /> : null}
+            {lead.facebook_url || lead.social_links?.facebook ? <SocialChip label="Facebook" url={lead.facebook_url || lead.social_links?.facebook} /> : null}
+            {lead.linkedin_url || lead.social_links?.linkedin ? <SocialChip label="LinkedIn" url={lead.linkedin_url || lead.social_links?.linkedin} /> : null}
+            {lead.tiktok_url || lead.social_links?.tiktok ? <SocialChip label="TikTok" url={lead.tiktok_url || lead.social_links?.tiktok} /> : null}
+            {lead.youtube_url || lead.social_links?.youtube ? <SocialChip label="YouTube" url={lead.youtube_url || lead.social_links?.youtube} /> : null}
+            {!hasAnySocial(lead) ? <span className="text-[11px] text-muted-foreground">{lead.web_enrichment_summary || "A busca web ainda não retornou redes confiáveis."}</span> : null}
+          </div>
+          {lead.instagram_followers ? <p className="mt-2 text-[11px] text-muted-foreground">Instagram: {new Intl.NumberFormat("pt-BR").format(lead.instagram_followers)} seguidores{lead.instagram_bio ? ` · ${lead.instagram_bio}` : ""}</p> : null}
+        </div>
+
         <div className="mt-4 grid grid-cols-3 gap-2">
           <LeadDecisionMetric
             label="Interesse"
@@ -3313,6 +3534,23 @@ function MiniMetric({
 
       <div className="mt-1 text-sm font-bold">{value}</div>
     </div>
+  );
+}
+
+function SocialChip({ label, url }: { label: string; url?: string }) {
+  const href = normalizeExternalUrl(url);
+  if (!href) return null;
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1 rounded-full border border-cyan-400/25 bg-background/60 px-2.5 py-1 text-[11px] font-black text-cyan-200 transition-colors hover:border-cyan-300 hover:bg-cyan-400/10"
+    >
+      {label}
+      <ExternalLink className="h-3 w-3" />
+    </a>
   );
 }
 

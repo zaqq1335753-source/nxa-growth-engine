@@ -28,6 +28,12 @@ import {
   Trash2,
   TrendingUp,
   Zap,
+  Instagram,
+  Facebook,
+  Linkedin,
+  Youtube,
+  AtSign,
+  Share2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -47,6 +53,10 @@ import { useToast } from "@/hooks/use-toast";
 
 const DEFAULT_BUSINESS_ID = "NEXA_PROD_01";
 const CACHE_MAX_AGE_DAYS = 15;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 type TemperatureFilter = "all" | "hot" | "warm" | "cold";
 type SortMode = "score" | "created" | "rating" | "name" | "potential";
@@ -132,6 +142,160 @@ function getReviews(lead: any) {
   const reviews = Number(lead?.google_reviews_count ?? lead?.reviews_count ?? lead?.user_ratings_total ?? lead?.reviews ?? 0);
   if (!Number.isFinite(reviews)) return 0;
   return Math.max(0, Math.round(reviews));
+}
+
+function readNested(obj: any, paths: string[]) {
+  for (const path of paths) {
+    const value = path.split(".").reduce((acc, key) => acc?.[key], obj);
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return null;
+}
+
+function normalizeSocialUrl(value: any) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("http://") || clean.startsWith("https://")) return clean;
+  if (clean.startsWith("@")) return `https://instagram.com/${clean.replace("@", "")}`;
+  return `https://${clean.replace(/^\/+/, "")}`;
+}
+
+function getSocialBundle(lead: any) {
+  const payload = lead?.payload || {};
+  const socialLinks = lead?.social_links || payload?.social_links || payload?.socials || payload?.web_enrichment?.social_links || payload?.enrichment?.social_links || {};
+  const socialProfiles = lead?.social_profiles || payload?.social_profiles || payload?.web_enrichment?.social_profiles || payload?.enrichment?.social_profiles || {};
+  const instagramProfile =
+    lead?.instagram_profile ||
+    socialProfiles?.instagram ||
+    socialLinks?.instagram_profile ||
+    payload?.instagram_profile ||
+    payload?.web_enrichment?.instagram_profile ||
+    payload?.enrichment?.instagram_profile ||
+    null;
+
+  const instagramUrl = normalizeSocialUrl(
+    readNested(lead, ["instagram_url", "instagram"]) ||
+      readNested(payload, ["instagram_url", "instagram"]) ||
+      socialLinks?.instagram ||
+      instagramProfile?.url ||
+      instagramProfile?.profile_url ||
+      instagramProfile?.external_url
+  );
+
+  const instagramUsername = String(
+    readNested(lead, ["instagram_username", "instagram_handle"]) ||
+      readNested(payload, ["instagram_username", "instagram_handle"]) ||
+      instagramProfile?.username ||
+      instagramUrl.split("instagram.com/")[1]?.split(/[/?#]/)[0] ||
+      ""
+  ).replace(/^@/, "");
+
+  const facebookUrl = normalizeSocialUrl(readNested(lead, ["facebook_url", "facebook"]) || readNested(payload, ["facebook_url", "facebook"]) || socialLinks?.facebook);
+  const linkedinUrl = normalizeSocialUrl(readNested(lead, ["linkedin_url", "linkedin"]) || readNested(payload, ["linkedin_url", "linkedin"]) || socialLinks?.linkedin);
+  const tiktokUrl = normalizeSocialUrl(readNested(lead, ["tiktok_url", "tiktok"]) || readNested(payload, ["tiktok_url", "tiktok"]) || socialLinks?.tiktok);
+  const youtubeUrl = normalizeSocialUrl(readNested(lead, ["youtube_url", "youtube"]) || readNested(payload, ["youtube_url", "youtube"]) || socialLinks?.youtube);
+
+  const followers = Number(
+    readNested(lead, ["instagram_followers", "followers"]) ||
+      readNested(payload, ["instagram_followers", "followers"]) ||
+      instagramProfile?.followers ||
+      instagramProfile?.followers_count ||
+      0
+  );
+
+  const bio = String(
+    readNested(lead, ["instagram_bio", "bio"]) ||
+      readNested(payload, ["instagram_bio", "bio"]) ||
+      instagramProfile?.biography ||
+      instagramProfile?.bio ||
+      ""
+  ).trim();
+
+  const links = [
+    instagramUrl && { key: "instagram", label: "Instagram", url: instagramUrl, icon: Instagram },
+    facebookUrl && { key: "facebook", label: "Facebook", url: facebookUrl, icon: Facebook },
+    linkedinUrl && { key: "linkedin", label: "LinkedIn", url: linkedinUrl, icon: Linkedin },
+    tiktokUrl && { key: "tiktok", label: "TikTok", url: tiktokUrl, icon: AtSign },
+    youtubeUrl && { key: "youtube", label: "YouTube", url: youtubeUrl, icon: Youtube },
+  ].filter(Boolean) as Array<{ key: string; label: string; url: string; icon: any }>;
+
+  const hasAny = links.length > 0;
+  const quality =
+    links.length >= 3 || followers >= 5000 ? "forte" :
+    links.length >= 1 || followers > 0 ? "encontrada" :
+    "pendente";
+
+  return {
+    hasAny,
+    quality,
+    links,
+    instagramUrl,
+    instagramUsername,
+    followers: Number.isFinite(followers) ? followers : 0,
+    bio,
+  };
+}
+
+function formatCompactNumber(value: number) {
+  if (!value || !Number.isFinite(value)) return "";
+  if (value >= 1000000) return `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  return String(value);
+}
+
+function SocialPresenceStrip({ lead, compact = false }: { lead: any; compact?: boolean }) {
+  const social = getSocialBundle(lead);
+
+  if (!social.hasAny) {
+    return (
+      <div className={cn(
+        "rounded-2xl border border-dashed border-border bg-card/40 text-muted-foreground",
+        compact ? "px-3 py-2 text-[11px]" : "p-3 text-xs"
+      )}>
+        <div className="flex items-center gap-2">
+          <Share2 className="h-3.5 w-3.5" />
+          Redes sociais ainda não encontradas
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(
+      "rounded-2xl border border-cyan-500/20 bg-cyan-500/10",
+      compact ? "px-3 py-2" : "p-3"
+    )}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("font-black text-cyan-200", compact ? "text-[11px]" : "text-xs")}>
+            Presença social {social.quality === "forte" ? "forte" : "encontrada"}
+          </p>
+          {social.instagramUsername && (
+            <p className="truncate text-[11px] text-muted-foreground">
+              @{social.instagramUsername}{social.followers ? ` · ${formatCompactNumber(social.followers)} seguidores` : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {social.links.slice(0, compact ? 3 : 5).map((item) => {
+            const Icon = item.icon;
+            return (
+              <a
+                key={item.key}
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-cyan-400/20 bg-background/60 text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-400/10"
+                title={item.label}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function scoreColor(score: number) {
@@ -248,6 +412,12 @@ function normalizeLead(lead: any) {
     website: cleanText(lead?.website) || cleanText(lead?.site),
     status: cleanText(lead?.status) || "new",
     nxaScore: getLeadScore(lead),
+    social_links: lead?.social_links || lead?.payload?.social_links || lead?.payload?.web_enrichment?.social_links || null,
+    social_profiles: lead?.social_profiles || lead?.payload?.social_profiles || lead?.payload?.web_enrichment?.social_profiles || null,
+    instagram_username: lead?.instagram_username || lead?.payload?.instagram_username || lead?.payload?.instagram_profile?.username || null,
+    instagram_url: lead?.instagram_url || lead?.payload?.instagram_url || lead?.payload?.social_links?.instagram || null,
+    instagram_followers: lead?.instagram_followers || lead?.payload?.instagram_followers || lead?.payload?.instagram_profile?.followers || null,
+    instagram_bio: lead?.instagram_bio || lead?.payload?.instagram_bio || lead?.payload?.instagram_profile?.biography || null,
     created_at: lead?.created_at || new Date().toISOString(),
   };
 }
@@ -268,6 +438,16 @@ function mapLeadToDatabase(lead: any, userId: string) {
     website: normalized.website,
     status: normalized.status || "new",
     nxa_score: getLeadScore(normalized),
+    payload: {
+      ...(lead?.payload || {}),
+      social_links: normalized.social_links || lead?.social_links || null,
+      social_profiles: normalized.social_profiles || lead?.social_profiles || null,
+      instagram_username: normalized.instagram_username || null,
+      instagram_url: normalized.instagram_url || null,
+      instagram_followers: normalized.instagram_followers || null,
+      instagram_bio: normalized.instagram_bio || null,
+      web_enrichment_status: lead?.web_enrichment_status || lead?.payload?.web_enrichment_status || null,
+    },
     created_at: normalized.created_at || new Date().toISOString(),
   };
 }
@@ -570,6 +750,10 @@ function LeadMissionCard({ lead, index, onDelete, onCopyPitch, onUpdateStatus }:
         </div>
       </div>
 
+      <div className="relative mt-3">
+        <SocialPresenceStrip lead={lead} />
+      </div>
+
       <div className="relative mt-3 flex flex-wrap gap-1.5">
         <Badge className={scoreBadge(score)}>{score} fit</Badge>
         <Badge className={status.color}>{status.label}</Badge>
@@ -652,6 +836,19 @@ export function Leads() {
 
     if (!error) return { inserted: toArray(data).length, duplicated: Math.max(0, payload.length - toArray(data).length) };
 
+    const message = String(error.message || "");
+    if (message.includes("payload") || message.includes("schema cache") || message.includes("column")) {
+      const compatiblePayload = payload.map(({ payload: _payload, ...row }) => row);
+      const retry = await supabase
+        .from("leads")
+        .upsert(compatiblePayload, {
+          onConflict: "business_id,phone,name,city",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+      if (!retry.error) return { inserted: toArray(retry.data).length, duplicated: Math.max(0, compatiblePayload.length - toArray(retry.data).length) };
+    }
+
     console.warn("Upsert em lote falhou, tentando linha a linha:", error);
 
     let inserted = 0;
@@ -670,6 +867,23 @@ export function Leads() {
         inserted += toArray(single.data).length;
         if (toArray(single.data).length === 0) duplicated += 1;
         continue;
+      }
+
+      const singleMessage = String(single.error?.message || "");
+      if (singleMessage.includes("payload") || singleMessage.includes("schema cache") || singleMessage.includes("column")) {
+        const { payload: _payload, ...compatibleRow } = row;
+        const retrySingle = await supabase
+          .from("leads")
+          .upsert(compatibleRow, {
+            onConflict: "business_id,phone,name,city",
+            ignoreDuplicates: true,
+          })
+          .select("id");
+        if (!retrySingle.error) {
+          inserted += toArray(retrySingle.data).length;
+          if (toArray(retrySingle.data).length === 0) duplicated += 1;
+          continue;
+        }
       }
 
       const code = single.error?.code || String(single.error?.status || "");
@@ -903,7 +1117,21 @@ export function Leads() {
       if (!statusOk || !tempOk) return false;
       if (!q) return true;
 
-      const searchable = normalizeForKey([lead.name, lead.city, lead.state, lead.segment, lead.category, lead.phone, lead.status, lead.website, lead.address].filter(Boolean).join(" "));
+      const social = getSocialBundle(lead);
+      const searchable = normalizeForKey([
+        lead.name,
+        lead.city,
+        lead.state,
+        lead.segment,
+        lead.category,
+        lead.phone,
+        lead.status,
+        lead.website,
+        lead.address,
+        social.instagramUsername,
+        social.bio,
+        social.links.map((item) => item.label).join(" "),
+      ].filter(Boolean).join(" "));
       return searchable.includes(q);
     });
 
@@ -923,7 +1151,8 @@ export function Leads() {
     const potential = filtered.reduce((acc: number, lead: any) => acc + estimateMonthlyPotential(lead), 0);
     const contactable = filtered.filter((lead: any) => Boolean(lead.phone)).length;
     const stale = filtered.filter((lead: any) => daysSince(lead.created_at) > CACHE_MAX_AGE_DAYS).length;
-    return { hot, urgent, avgScore, potential, contactable, stale };
+    const socialReady = filtered.filter((lead: any) => getSocialBundle(lead).hasAny).length;
+    return { hot, urgent, avgScore, potential, contactable, stale, socialReady };
   }, [filtered]);
 
   const segmentLeaders = React.useMemo(() => {
@@ -1014,9 +1243,9 @@ export function Leads() {
                 <p className="text-xs text-muted-foreground">estimativa por score</p>
               </div>
               <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Dados prontos</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Contato + redes</p>
                 <p className="mt-1 text-2xl font-black text-cyan-300">{metrics.contactable}</p>
-                <p className="text-xs text-muted-foreground">com telefone/WhatsApp</p>
+                <p className="text-xs text-muted-foreground">{metrics.socialReady} com presença social</p>
               </div>
             </div>
           </div>
@@ -1070,7 +1299,7 @@ export function Leads() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricTile label="Score médio" value={metrics.avgScore} helper="qualidade comercial" icon={Gauge} tone={scoreColor(metrics.avgScore)} />
-        <MetricTile label="Contatáveis" value={metrics.contactable} helper={`${metrics.stale} precisam revalidar`} icon={Phone} tone="text-cyan-300" />
+        <MetricTile label="Contatáveis" value={metrics.contactable} helper={`${metrics.socialReady} com redes encontradas`} icon={Phone} tone="text-cyan-300" />
         <MetricTile label="Prioridade alta" value={metrics.hot} helper={`${metrics.urgent} urgentes hoje`} icon={Flame} tone="text-orange-300" />
         <MetricTile label="Potencial" value={money(metrics.potential)} helper="estimativa mensal" icon={TrendingUp} tone="text-emerald-300" />
         <MetricTile label="Base total" value={leads.length} helper={`${filtered.length} no filtro atual`} icon={Database} />
@@ -1309,6 +1538,9 @@ export function Leads() {
                       <div className="truncate font-black">{lead.name}</div>
                     </div>
                     <div className="mt-1 truncate text-xs text-muted-foreground">{lead.segment || lead.category} · {lead.city || "sem cidade"}</div>
+                    <div className="mt-2">
+                      <SocialPresenceStrip lead={lead} compact />
+                    </div>
                   </div>
                   <Badge className={`${scoreBadge(score)} justify-center`}>{score} · {getTemperatureLabel(score)}</Badge>
                   <div className="text-sm font-black text-emerald-300">{money(estimateMonthlyPotential(lead))}</div>
