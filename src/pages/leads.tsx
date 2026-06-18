@@ -25,7 +25,6 @@ import {
   Sparkles,
   Star,
   Target,
-  Trash2,
   TrendingUp,
   Zap,
   Instagram,
@@ -34,6 +33,12 @@ import {
   Youtube,
   AtSign,
   Share2,
+  Megaphone,
+  MessageCircle,
+  CalendarPlus,
+  Send,
+  Copy,
+  Ban,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -69,6 +74,10 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   negotiating: { label: "Negociando", color: "bg-orange-500/10 text-orange-300 border-orange-500/20" },
   closed: { label: "Fechado", color: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" },
   lost: { label: "Perdido", color: "bg-red-500/10 text-red-300 border-red-500/20" },
+  prioridade_ia: { label: "Prioridade IA", color: "bg-red-500/10 text-red-300 border-red-500/25" },
+  fit_alto: { label: "Fit alto", color: "bg-orange-500/10 text-orange-300 border-orange-500/25" },
+  qualificar: { label: "Qualificar", color: "bg-cyan-500/10 text-cyan-300 border-cyan-500/25" },
+  nutrir: { label: "Nutrir", color: "bg-slate-500/10 text-slate-300 border-slate-500/25" },
 };
 
 function getBusinessId() {
@@ -449,6 +458,7 @@ function mapLeadToDatabase(lead: any, userId: string) {
       web_enrichment_status: lead?.web_enrichment_status || lead?.payload?.web_enrichment_status || null,
     },
     created_at: normalized.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 }
 
@@ -472,8 +482,8 @@ function uniqueById<T extends Record<string, any>>(items: T[]) {
   return Array.from(map.values());
 }
 
-function getStoredLastSearch() {
-  const keys = [
+function getStoredSearches() {
+  const directKeys = [
     "nxa_last_search_results",
     "nxa_last_search",
     "nxa_radar_results",
@@ -481,12 +491,34 @@ function getStoredLastSearch() {
     "last_search_results",
   ];
 
-  for (const key of keys) {
+  const searches: any[] = [];
+
+  for (const key of directKeys) {
     const parsed = safeJsonParse(localStorage.getItem(key), null);
     const results = toArray(parsed?.results || parsed?.leads || parsed?.data || parsed);
-    if (parsed && results.length > 0) return parsed;
+    if (parsed && results.length > 0) searches.push(parsed);
   }
-  return null;
+
+  const history = safeJsonParse(localStorage.getItem("nxa_search_history"), []);
+  for (const item of toArray(history)) {
+    const results = toArray(item?.results || item?.leads || item?.data || item);
+    if (item && results.length > 0) searches.push(item);
+  }
+
+  const unique = new Map<string, any>();
+  for (const search of searches) {
+    unique.set(searchSignature(search), search);
+  }
+
+  return Array.from(unique.values()).sort((a, b) => {
+    const aTime = new Date(a?.created_at || a?.timestamp || a?.date || 0).getTime();
+    const bTime = new Date(b?.created_at || b?.timestamp || b?.date || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+function getStoredLastSearch() {
+  return getStoredSearches()[0] || null;
 }
 
 type SearchScope = {
@@ -636,9 +668,126 @@ function formatLeadDate(date: any) {
 }
 
 function whatsappUrl(phone: any) {
-  const digits = String(phone || "").replace(/\D/g, "");
+  return whatsappUrlWithMessage(phone);
+}
+
+
+function onlyDigits(value: any) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getLatestSalesOffer() {
+  const fallback = {
+    name: "sua solução",
+    description: "ajudar empresas a melhorar resultado, atendimento e vendas",
+    price: "",
+    idealCustomer: "",
+    painPoints: "",
+    differentials: "",
+    objections: "",
+  };
+
+  try {
+    const raw =
+      localStorage.getItem("nxa_sales_offer_v2") ||
+      localStorage.getItem("nxa_sales_offer") ||
+      localStorage.getItem("nxa_latest_offer");
+
+    if (!raw) return fallback;
+
+    const parsed = JSON.parse(raw);
+    return {
+      ...fallback,
+      ...parsed,
+      name: parsed?.name || parsed?.title || parsed?.offer_name || fallback.name,
+      description: parsed?.description || parsed?.summary || parsed?.offer_description || fallback.description,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function getLeadCommercialSignals(lead: any) {
+  const score = getLeadScore(lead);
+  const rating = getRating(lead);
+  const reviews = getReviews(lead);
+  const social = getSocialBundle(lead);
+  const hasPhone = Boolean(lead.phone);
+  const hasWebsite = Boolean(lead.website);
+  const signals: string[] = [];
+
+  if (hasPhone) signals.push("tem WhatsApp/telefone");
+  if (reviews >= 80) signals.push(`possui ${reviews} avaliações`);
+  if (rating >= 4.5) signals.push(`nota ${rating.toFixed(1)} no Google`);
+  if (!hasWebsite) signals.push("não encontrei site claro");
+  if (hasWebsite && !social.hasAny) signals.push("presença social pode estar abaixo do potencial");
+  if (score >= 80) signals.push("alto potencial comercial");
+
+  return signals.slice(0, 4);
+}
+
+function buildPersonalizedMessage(lead: any, goal = "diagnostico") {
+  const offer = getLatestSalesOffer();
+  const offerName = cleanText(offer.name) || "minha solução";
+  const offerDescription = cleanText(offer.description) || "melhorar o resultado comercial";
+  const city = lead.city ? ` em ${lead.city}` : "";
+  const segment = lead.segment || lead.category || "negócio";
+  const signals = getLeadCommercialSignals(lead);
+  const signalText = signals.length
+    ? signals.join(", ")
+    : "alguns sinais comerciais interessantes no perfil de vocês";
+
+  const hooks: Record<string, string> = {
+    diagnostico: "fiz uma análise rápida",
+    oferta: "tenho uma ideia prática",
+    followup: "passando só para retomar meu contato",
+    convite: "queria te chamar para uma conversa rápida",
+  };
+
+  const hook = hooks[goal] || hooks.diagnostico;
+
+  return `Olá, tudo bem? ${hook} da ${lead.name}${city} e vi que vocês atuam em ${segment}. Me chamou atenção que ${signalText}.
+
+Trabalho com ${offerName}, que ajuda empresas a ${offerDescription}.
+
+Faz sentido eu te mandar uma sugestão objetiva aplicada ao negócio de vocês?`;
+}
+
+function whatsappUrlWithMessage(phone: any, message?: string) {
+  const digits = onlyDigits(phone);
   if (!digits) return "#";
-  return `https://wa.me/${digits.startsWith("55") ? digits : `55${digits}`}`;
+  const normalized = digits.startsWith("55") ? digits : `55${digits}`;
+  const text = message ? `?text=${encodeURIComponent(message)}` : "";
+  return `https://wa.me/${normalized}${text}`;
+}
+
+function writeLocalQueue(key: string, value: any) {
+  try {
+    const current = safeJsonParse(localStorage.getItem(key), []);
+    const arr = Array.isArray(current) ? current : [];
+    localStorage.setItem(key, JSON.stringify([value, ...arr].slice(0, 300)));
+  } catch {
+    // não trava a interface
+  }
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob(["\uFEFF" + content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildCampaignText(leads: any[], goal: string) {
+  return leads
+    .map((lead, index) => {
+      const message = buildPersonalizedMessage(lead, goal);
+      return `#${index + 1} ${lead.name}\nTelefone: ${lead.phone || "sem telefone"}\nCidade: ${lead.city || "-"} / ${lead.state || "-"}\nMensagem:\n${message}\n`;
+    })
+    .join("\n---\n\n");
 }
 
 function SourcePill({ source, lastSync }: { source: SourceMode; lastSync: string | null }) {
@@ -669,7 +818,7 @@ function MetricTile({ label, value, helper, icon: Icon, tone = "text-primary" }:
   );
 }
 
-function LeadMissionCard({ lead, index, onDelete, onCopyPitch, onUpdateStatus }: any) {
+function LeadMissionCard({ lead, index, selected, onToggleSelect, onDelete, onCopyPitch, onOpenWhatsApp, onCreateFollowup, onAddToCampaign, onMarkContacted, onDiscard, onUpdateStatus }: any) {
   const score = getLeadScore(lead);
   const rating = getRating(lead);
   const reviews = getReviews(lead);
@@ -687,8 +836,11 @@ function LeadMissionCard({ lead, index, onDelete, onCopyPitch, onUpdateStatus }:
     >
       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-cyan-400 to-orange-400 opacity-75" />
       <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-primary/10 blur-2xl transition-all group-hover:bg-primary/20" />
+      <label className="absolute left-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-border bg-background/80 shadow-lg">
+        <input type="checkbox" checked={Boolean(selected)} onChange={() => onToggleSelect(lead)} className="h-4 w-4 accent-primary" />
+      </label>
 
-      <div className="relative flex items-start justify-between gap-3">
+      <div className="relative flex items-start justify-between gap-3 pl-9">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-primary">
@@ -765,18 +917,20 @@ function LeadMissionCard({ lead, index, onDelete, onCopyPitch, onUpdateStatus }:
       </div>
 
       <div className="relative mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
-        <Button asChild size="sm" className="h-9 gap-1.5 rounded-xl font-black">
-          <Link href={`/leads/${lead.id}`}>
-            <Eye className="h-3.5 w-3.5" /> Abrir
-          </Link>
+        <Button size="sm" className="h-9 gap-1.5 rounded-xl font-black" onClick={() => onOpenWhatsApp(lead)}>
+          <MessageCircle className="h-3.5 w-3.5" /> Prospectar
         </Button>
         <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl font-bold" onClick={() => onCopyPitch(lead)}>
-          <Clipboard className="h-3.5 w-3.5" /> Pitch
+          <Copy className="h-3.5 w-3.5" /> Copiar msg
         </Button>
-        <Button asChild variant="secondary" size="sm" className="h-9 gap-1.5 rounded-xl font-bold">
-          <a href={whatsappUrl(lead.phone)} target="_blank" rel="noreferrer">
-            <Phone className="h-3.5 w-3.5" /> WhatsApp
-          </a>
+        <Button variant="secondary" size="sm" className="h-9 gap-1.5 rounded-xl font-bold" onClick={() => onCreateFollowup(lead)}>
+          <CalendarPlus className="h-3.5 w-3.5" /> Follow-up
+        </Button>
+        <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl font-bold" onClick={() => onAddToCampaign(lead)}>
+          <Megaphone className="h-3.5 w-3.5" /> Campanha
+        </Button>
+        <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl font-bold" onClick={() => onMarkContacted(lead)}>
+          <Phone className="h-3.5 w-3.5" /> Contatado
         </Button>
         <Select value={lead.status || "new"} onValueChange={(value) => onUpdateStatus(lead, value)}>
           <SelectTrigger className="h-9 rounded-xl text-xs font-bold">
@@ -788,8 +942,13 @@ function LeadMissionCard({ lead, index, onDelete, onCopyPitch, onUpdateStatus }:
             ))}
           </SelectContent>
         </Select>
-        <Button variant="ghost" size="sm" className="col-span-2 h-8 gap-1.5 rounded-xl text-xs text-red-300 hover:text-red-200" onClick={() => onDelete(lead.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Remover da central
+        <Button asChild variant="ghost" size="sm" className="h-8 gap-1.5 rounded-xl text-xs">
+          <Link href={`/leads/${lead.id}`}>
+            <Eye className="h-3.5 w-3.5" /> Abrir perfil
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" className="h-8 gap-1.5 rounded-xl text-xs text-red-300 hover:text-red-200" onClick={() => onDiscard(lead)}>
+          <Ban className="h-3.5 w-3.5" /> Descartar
         </Button>
       </div>
     </motion.div>
@@ -813,6 +972,10 @@ export function Leads() {
   const [showHeatmap, setShowHeatmap] = React.useState(false);
   const [showStrategicPanel, setShowStrategicPanel] = React.useState(true);
   const [showAllOpportunities, setShowAllOpportunities] = React.useState(false);
+  const [showProspectingHub, setShowProspectingHub] = React.useState(true);
+  const [selectedLeadIds, setSelectedLeadIds] = React.useState<string[]>([]);
+  const [campaignGoal, setCampaignGoal] = React.useState("diagnostico");
+  const [campaignName, setCampaignName] = React.useState("Prospecção ativa");
   const lastAutoImportRef = React.useRef<string | null>(null);
   const realtimeChannelRef = React.useRef<any>(null);
   const { toast } = useToast();
@@ -830,7 +993,7 @@ export function Leads() {
       .from("leads")
       .upsert(payload, {
         onConflict: "business_id,phone,name,city",
-        ignoreDuplicates: true,
+        ignoreDuplicates: false,
       })
       .select("id");
 
@@ -838,12 +1001,12 @@ export function Leads() {
 
     const message = String(error.message || "");
     if (message.includes("payload") || message.includes("schema cache") || message.includes("column")) {
-      const compatiblePayload = payload.map(({ payload: _payload, ...row }) => row);
+      const compatiblePayload = payload.map(({ payload: _payload, updated_at: _updatedAt, ...row }) => row);
       const retry = await supabase
         .from("leads")
         .upsert(compatiblePayload, {
           onConflict: "business_id,phone,name,city",
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         })
         .select("id");
       if (!retry.error) return { inserted: toArray(retry.data).length, duplicated: Math.max(0, compatiblePayload.length - toArray(retry.data).length) };
@@ -859,7 +1022,7 @@ export function Leads() {
         .from("leads")
         .upsert(row, {
           onConflict: "business_id,phone,name,city",
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         })
         .select("id");
 
@@ -871,12 +1034,12 @@ export function Leads() {
 
       const singleMessage = String(single.error?.message || "");
       if (singleMessage.includes("payload") || singleMessage.includes("schema cache") || singleMessage.includes("column")) {
-        const { payload: _payload, ...compatibleRow } = row;
+        const { payload: _payload, updated_at: _updatedAt, ...compatibleRow } = row;
         const retrySingle = await supabase
           .from("leads")
           .upsert(compatibleRow, {
             onConflict: "business_id,phone,name,city",
-            ignoreDuplicates: true,
+            ignoreDuplicates: false,
           })
           .select("id");
         if (!retrySingle.error) {
@@ -907,7 +1070,17 @@ export function Leads() {
         normalizeLead({ ...lead, _source: "leads" })
       );
 
-      setLeads(uniqueById(dbLeads));
+      const localSearchLeads = getStoredSearches()
+        .flatMap((item: any) => toArray(item?.results || item?.leads || item?.data || item).map((lead: any) => normalizeLead({
+          ...lead,
+          _source: "local-search",
+          business_id: businessId,
+          segment: lead?.segment || lead?.category || item?.niche || item?.segment || item?.query || "Sem segmento",
+          city: lead?.city || item?.city || lead?.cidade,
+          state: lead?.state || item?.state || lead?.uf,
+        })));
+
+      setLeads(uniqueById([...localSearchLeads, ...dbLeads]));
       setSource("supabase");
       setLastSync(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
       localStorage.setItem("nxa_leads_cache", JSON.stringify(dbLeads));
@@ -931,43 +1104,56 @@ export function Leads() {
     if (isImporting) return;
 
     const scope = refreshSearchScope();
-    if (!scope.active || !scope.signature) return;
-    if (lastAutoImportRef.current === scope.signature) return;
-    lastAutoImportRef.current = scope.signature;
+    const storedSearches = getStoredSearches();
+    if (!scope.active || storedSearches.length === 0) return;
+
+    const combinedSignature = storedSearches.map((item) => searchSignature(item)).join("::");
+    if (lastAutoImportRef.current === combinedSignature) return;
+    lastAutoImportRef.current = combinedSignature;
 
     try {
       if (!silent) setIsImporting(true);
       const user = await getCurrentUser();
-      const parsed = getStoredLastSearch();
-      const rawResults = toArray(parsed?.results || parsed?.leads || parsed?.data || parsed);
       const businessId = getBusinessId();
+      const mergedResults: any[] = [];
 
-      const normalizedResults = uniqueByKey(
-        rawResults.map((lead: any) => ({
-          ...lead,
-          user_id: user.id,
-          business_id: businessId,
-          segment: lead.segment || lead.category || parsed?.niche || parsed?.segment || parsed?.query || "Sem segmento",
-          city: lead.city || parsed?.city || lead.cidade,
-          state: lead.state || parsed?.state || lead.uf,
-        }))
-      );
+      for (const parsed of storedSearches.slice(0, 12)) {
+        const rawResults = toArray(parsed?.results || parsed?.leads || parsed?.data || parsed);
+        for (const lead of rawResults) {
+          mergedResults.push({
+            ...lead,
+            user_id: user.id,
+            business_id: businessId,
+            segment: lead.segment || lead.category || parsed?.niche || parsed?.segment || parsed?.query || "Sem segmento",
+            city: lead.city || parsed?.city || lead.cidade,
+            state: lead.state || parsed?.state || lead.uf,
+            payload: {
+              ...(lead?.payload || {}),
+              search_context: {
+                search_id: parsed?.id || parsed?.search_id || null,
+                query: parsed?.query || parsed?.niche || parsed?.segment || null,
+                city: parsed?.city || null,
+                state: parsed?.state || null,
+                quantity: parsed?.quantity || parsed?.limit || rawResults.length,
+                created_at: parsed?.created_at || parsed?.timestamp || null,
+              },
+            },
+          });
+        }
+      }
 
-      const currentDbLeads = await fetchAllLeadsFromSupabase(businessId, user.id);
-      const existingKeys = new Set(currentDbLeads.map((lead: any) => leadKey({ ...lead, user_id: user.id, business_id: businessId })));
-      const payload = normalizedResults
-        .map((lead: any) => mapLeadToDatabase(lead, user.id))
-        .filter((lead: any) => !existingKeys.has(leadKey(lead)));
+      const normalizedResults = uniqueByKey(mergedResults);
+      const payload = normalizedResults.map((lead: any) => mapLeadToDatabase(lead, user.id));
 
       if (payload.length > 0) await insertPayloadSafely(payload);
       await loadLeadsFromSupabase(true);
     } catch (error: any) {
-      console.error("Erro ao sincronizar última busca com Supabase:", error);
+      console.error("Erro ao sincronizar buscas recentes com Supabase:", error);
       lastAutoImportRef.current = null;
       if (!silent) {
         toast({
-          title: "Erro ao sincronizar a busca.",
-          description: error?.message || "Não foi possível salvar automaticamente a última busca no banco.",
+          title: "Erro ao sincronizar as buscas.",
+          description: error?.message || "Não foi possível salvar automaticamente as últimas buscas no banco.",
           variant: "destructive",
         });
       }
@@ -1070,7 +1256,7 @@ export function Leads() {
   const importLastSearchToLeads = async () => {
     lastAutoImportRef.current = null;
     await syncLastSearchToSupabase(false);
-    toast({ title: "Central atualizada.", description: "A última varredura foi sincronizada com a carteira de oportunidades." });
+    toast({ title: "Central atualizada.", description: "As últimas pesquisas da Busca Inteligente foram sincronizadas com a carteira de oportunidades." });
   };
 
   const deleteLead = async (id: string) => {
@@ -1099,9 +1285,149 @@ export function Leads() {
   };
 
   const copyPitch = async (lead: any) => {
-    const pitch = `Olá! Analisei a ${lead.name} em ${lead.city || "sua região"} e vi uma oportunidade clara para melhorar captação, atendimento e follow-up com automação e IA. Pelo perfil da empresa, acredito que dá para reduzir perda de contatos e aumentar conversões sem aumentar equipe. Posso te mostrar um diagnóstico rápido de 5 minutos?`;
+    const pitch = buildPersonalizedMessage(lead, campaignGoal);
     await navigator.clipboard.writeText(pitch);
-    toast({ title: "Pitch copiado.", description: "Mensagem consultiva pronta para abordagem." });
+    toast({ title: "Mensagem personalizada copiada.", description: "A abordagem usou a última oferta configurada e os sinais do lead." });
+  };
+
+  const toggleLeadSelection = React.useCallback((lead: any) => {
+    const id = String(lead.id);
+    setSelectedLeadIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  }, []);
+
+  const selectedLeads = React.useMemo(() => {
+    const selected = new Set(selectedLeadIds.map(String));
+    return leads.filter((lead: any) => selected.has(String(lead.id)));
+  }, [leads, selectedLeadIds]);
+
+  const openWhatsAppProspecting = async (lead: any) => {
+    const message = buildPersonalizedMessage(lead, campaignGoal);
+    await navigator.clipboard.writeText(message).catch(() => null);
+
+    if (!lead.phone) {
+      toast({
+        title: "Telefone indisponível.",
+        description: "Copiei a mensagem, mas esse lead não possui telefone para abrir no WhatsApp.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    window.open(whatsappUrlWithMessage(lead.phone, message), "_blank", "noopener,noreferrer");
+    await updateLeadStatus(lead, "contacted");
+    writeLocalQueue("nxa_whatsapp_outbox", {
+      lead_id: lead.id,
+      lead_name: lead.name,
+      phone: lead.phone,
+      message,
+      status: "opened",
+      created_at: new Date().toISOString(),
+    });
+
+    toast({ title: "WhatsApp aberto.", description: "Mensagem personalizada pronta para envio manual." });
+  };
+
+  const createFollowup = async (lead: any) => {
+    const followup = {
+      id: crypto?.randomUUID?.() || String(Date.now()),
+      lead_id: lead.id,
+      lead_name: lead.name,
+      phone: lead.phone || null,
+      channel: "whatsapp",
+      priority: getLeadScore(lead) >= 80 ? "high" : "normal",
+      status: "pending",
+      date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      notes: `Retomar contato com ${lead.name}. Mensagem sugerida: ${buildPersonalizedMessage(lead, "followup")}`,
+      created_at: new Date().toISOString(),
+    };
+
+    writeLocalQueue("nxa_followup_queue", followup);
+
+    try {
+      const user = await getCurrentUser();
+      await supabase.from("followups").insert({
+        user_id: user.id,
+        lead_id: lead.id,
+        channel: "whatsapp",
+        priority: followup.priority,
+        status: "pending",
+        date: followup.date,
+        notes: followup.notes,
+      });
+    } catch {
+      // fallback local já foi salvo
+    }
+
+    toast({ title: "Follow-up criado.", description: `${lead.name} entrou na fila de retomada.` });
+  };
+
+  const addLeadToCampaign = (lead: any) => {
+    writeLocalQueue("nxa_campaign_queue", {
+      campaign_name: campaignName,
+      goal: campaignGoal,
+      lead_id: lead.id,
+      lead_name: lead.name,
+      phone: lead.phone || null,
+      message: buildPersonalizedMessage(lead, campaignGoal),
+      created_at: new Date().toISOString(),
+    });
+
+    toast({ title: "Lead adicionado à campanha.", description: `${lead.name} entrou na lista "${campaignName}".` });
+  };
+
+  const markContacted = async (lead: any) => {
+    await updateLeadStatus(lead, "contacted");
+    writeLocalQueue("nxa_contacted_log", {
+      lead_id: lead.id,
+      lead_name: lead.name,
+      phone: lead.phone || null,
+      created_at: new Date().toISOString(),
+    });
+    toast({ title: "Lead marcado como contatado.", description: `${lead.name} saiu da fila fria.` });
+  };
+
+  const discardLead = async (lead: any) => {
+    await updateLeadStatus(lead, "lost");
+    toast({ title: "Lead descartado.", description: `${lead.name} foi marcado como perdido/descartado.` });
+  };
+
+  const selectTopLeads = () => {
+    const top = filtered
+      .filter((lead: any) => Boolean(lead.phone))
+      .slice(0, 30)
+      .map((lead: any) => String(lead.id));
+
+    setSelectedLeadIds(top);
+    toast({ title: "Top leads selecionados.", description: `${top.length} leads com telefone foram selecionados para ação.` });
+  };
+
+  const clearSelection = () => setSelectedLeadIds([]);
+
+  const exportSelectedCampaign = () => {
+    const base = selectedLeads.length ? selectedLeads : filtered.slice(0, 30);
+    if (!base.length) {
+      toast({ title: "Nenhum lead para campanha.", variant: "destructive" });
+      return;
+    }
+
+    downloadTextFile(
+      `nxa-campanha-${campaignName.toLowerCase().replace(/\s+/g, "-")}.txt`,
+      buildCampaignText(base, campaignGoal)
+    );
+
+    toast({ title: "Campanha exportada.", description: `${base.length} mensagens personalizadas foram geradas.` });
+  };
+
+  const openNextSelectedWhatsApp = () => {
+    const next = selectedLeads.find((lead: any) => Boolean(lead.phone));
+    if (!next) {
+      toast({ title: "Nenhum selecionado com telefone.", variant: "destructive" });
+      return;
+    }
+    openWhatsAppProspecting(next);
+    setSelectedLeadIds((current) => current.filter((id) => String(id) !== String(next.id)));
   };
 
   const scopedLeads = React.useMemo(() => {
@@ -1297,6 +1623,88 @@ export function Leads() {
         </Card>
       )}
 
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-card/85 via-background/70 to-primary/5 backdrop-blur">
+        <CardContent className="p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <Badge className="border-primary/20 bg-primary/10 text-primary">
+                <Megaphone className="mr-1 h-3.5 w-3.5" /> Central de Prospecção WhatsApp
+              </Badge>
+              <h2 className="mt-3 text-xl font-black">Ações rápidas para quem trabalha com leads todos os dias</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Gere mensagens individuais usando a última oferta configurada, monte campanhas semi-automáticas, crie follow-ups, marque contatados e avance lead por lead sem cair em disparo em massa arriscado.
+              </p>
+            </div>
+            <Button variant="outline" className="rounded-xl" onClick={() => setShowProspectingHub((value) => !value)}>
+              {showProspectingHub ? "Recolher ações" : "Abrir ações"}
+            </Button>
+          </div>
+
+          {showProspectingHub && (
+            <div className="mt-5 grid gap-4 xl:grid-cols-[1fr_0.9fr]">
+              <div className="rounded-3xl border border-border bg-background/45 p-4">
+                <div className="grid gap-3 md:grid-cols-[1fr_190px]">
+                  <Input
+                    value={campaignName}
+                    onChange={(event) => setCampaignName(event.target.value)}
+                    placeholder="Nome da campanha"
+                    className="rounded-xl"
+                  />
+                  <Select value={campaignGoal} onValueChange={setCampaignGoal}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Objetivo" />
+                    </SelectTrigger>
+                    <SelectContent className="border-border bg-background">
+                      <SelectItem value="diagnostico">Diagnóstico consultivo</SelectItem>
+                      <SelectItem value="oferta">Apresentar oferta</SelectItem>
+                      <SelectItem value="convite">Convidar para conversa</SelectItem>
+                      <SelectItem value="followup">Follow-up</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="mt-4 grid gap-2 md:grid-cols-4">
+                  <Button variant="outline" className="rounded-xl" onClick={selectTopLeads}>
+                    <Target className="mr-2 h-4 w-4" /> Top 30
+                  </Button>
+                  <Button variant="outline" className="rounded-xl" onClick={openNextSelectedWhatsApp} disabled={!selectedLeadIds.length}>
+                    <Send className="mr-2 h-4 w-4" /> Próximo WhatsApp
+                  </Button>
+                  <Button className="rounded-xl font-black" onClick={exportSelectedCampaign}>
+                    <Megaphone className="mr-2 h-4 w-4" /> Gerar campanha
+                  </Button>
+                  <Button variant="ghost" className="rounded-xl" onClick={clearSelection} disabled={!selectedLeadIds.length}>
+                    Limpar seleção
+                  </Button>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-orange-400/20 bg-orange-400/10 p-3 text-xs leading-relaxed text-orange-100">
+                  <strong>Modo seguro:</strong> a plataforma gera mensagens personalizadas e abre o WhatsApp para envio manual. Isso evita comportamento de spam e reduz risco de bloqueio do número.
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                <div className="rounded-2xl border border-border bg-background/45 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Selecionados</p>
+                  <p className="mt-1 text-2xl font-black text-primary">{selectedLeadIds.length}</p>
+                  <p className="text-xs text-muted-foreground">fila de prospecção</p>
+                </div>
+                <div className="rounded-2xl border border-border bg-background/45 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Com WhatsApp</p>
+                  <p className="mt-1 text-2xl font-black text-cyan-300">{selectedLeads.filter((lead: any) => Boolean(lead.phone)).length}</p>
+                  <p className="text-xs text-muted-foreground">prontos para abrir</p>
+                </div>
+                <div className="rounded-2xl border border-border bg-background/45 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Oferta base</p>
+                  <p className="mt-1 truncate text-sm font-black text-emerald-300">{getLatestSalesOffer().name}</p>
+                  <p className="text-xs text-muted-foreground">usada nas mensagens</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricTile label="Score médio" value={metrics.avgScore} helper="qualidade comercial" icon={Gauge} tone={scoreColor(metrics.avgScore)} />
         <MetricTile label="Contatáveis" value={metrics.contactable} helper={`${metrics.socialReady} com redes encontradas`} icon={Phone} tone="text-cyan-300" />
@@ -1354,7 +1762,7 @@ export function Leads() {
               </Button>
               <Button onClick={importLastSearchToLeads} disabled={isLoading || isImporting} className="rounded-xl font-black">
                 <Database className={`mr-2 h-4 w-4 ${isImporting ? "animate-pulse" : ""}`} />
-                {isImporting ? "Sincronizando..." : "Sincronizar varredura"}
+                {isImporting ? "Sincronizando..." : "Sincronizar buscas"}
               </Button>
             </div>
 
@@ -1484,7 +1892,7 @@ export function Leads() {
         <div className="rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="font-black text-cyan-200">Foco na última varredura</p>
+              <p className="font-black text-cyan-200">Foco na última busca inteligente</p>
               <p className="mt-1 text-sm text-muted-foreground">{lastSearchScope.label} · esperado: {lastSearchScope.expectedCount} lead(s). A carteira completa continua salva no Supabase.</p>
             </div>
             <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setShowFullWallet(true)}>Mostrar banco completo</Button>
@@ -1545,9 +1953,10 @@ export function Leads() {
                   <Badge className={`${scoreBadge(score)} justify-center`}>{score} · {getTemperatureLabel(score)}</Badge>
                   <div className="text-sm font-black text-emerald-300">{money(estimateMonthlyPotential(lead))}</div>
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyPitch(lead)}><Clipboard className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openWhatsAppProspecting(lead)}><MessageCircle className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyPitch(lead)}><Copy className="h-4 w-4" /></Button>
                     <Button asChild variant="ghost" size="icon" className="h-8 w-8"><Link href={`/leads/${lead.id}`}><ChevronRight className="h-4 w-4" /></Link></Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-300" onClick={() => deleteLead(lead.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-300" onClick={() => discardLead(lead)}><Ban className="h-4 w-4" /></Button>
                   </div>
                 </motion.div>
               );
@@ -1560,8 +1969,15 @@ export function Leads() {
                 key={lead.id || index}
                 lead={lead}
                 index={index}
+                selected={selectedLeadIds.includes(String(lead.id))}
+                onToggleSelect={toggleLeadSelection}
                 onDelete={deleteLead}
                 onCopyPitch={copyPitch}
+                onOpenWhatsApp={openWhatsAppProspecting}
+                onCreateFollowup={createFollowup}
+                onAddToCampaign={addLeadToCampaign}
+                onMarkContacted={markContacted}
+                onDiscard={discardLead}
                 onUpdateStatus={updateLeadStatus}
               />
             ))}

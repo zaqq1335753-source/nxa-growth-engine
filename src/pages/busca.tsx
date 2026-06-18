@@ -1,4 +1,4 @@
-// BUSCA FINAL CORRIGIDA - sem tempPresentation, sem posicionamento genérico, oferta como base real da análise
+// BUSCA LEAD HUNTER AVANÇADA - foco total em pesquisa, enriquecimento, score e abordagem de leads
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -53,6 +53,18 @@ const CREDIT_COST_PER_LEAD = 1;
 const MIN_CREDITS_TO_SEARCH = 1;
 
 type Mode = "catalogo" | "custom";
+
+type LeadObjective =
+  | "all"
+  | "whatsapp"
+  | "no_site"
+  | "high_reviews"
+  | "social_gap"
+  | "premium"
+  | "new_business"
+  | "high_flow"
+  | "weak_instagram"
+  | "no_digital_presence";
 
 type SalesOffer = {
   name: string;
@@ -119,6 +131,22 @@ type Lead = {
   web_enrichment_status?: "pending" | "completed" | "failed" | "skipped";
   web_enrichment_summary?: string;
   web_enrichment_confidence?: number;
+  working_hours?: string;
+  contact_quality?: number;
+  digital_strength?: number;
+  response_chance?: number;
+  commercial_signals?: string[];
+  commercial_score_breakdown?: Array<{ label: string; points: number }>;
+  campaign_status?: "none" | "selected" | "contacted" | "discarded";
+  commercial_score?: number;
+  offer_compatibility_score?: number;
+  final_priority_score?: number;
+  decision_label?: string;
+  decision_reason?: string;
+  offer_fit_summary?: string;
+  offer_fit_next_step?: string;
+  financial_potential?: number;
+  structure_score?: number;
 };
 
 type Category = {
@@ -939,22 +967,131 @@ function safeReadArrayStorage(key: string) {
   }
 }
 
-function saveLastSearchForRadar(search: any) {
+function slimLeadForStorage(lead: Lead) {
+  return {
+    id: lead.id,
+    place_id: lead.place_id || null,
+    name: lead.name,
+    segment: lead.segment,
+    city: lead.city,
+    state: lead.state,
+    address: lead.address,
+    phone: lead.phone || "",
+    website: lead.website || "",
+    maps_url: lead.maps_url || "",
+    google_rating: lead.google_rating || 0,
+    google_reviews_count: lead.google_reviews_count || 0,
+    score: lead.ai_fit_score || lead.score || 0,
+    ai_fit_score: lead.ai_fit_score || lead.score || 0,
+    ai_purchase_probability: lead.ai_purchase_probability || 0,
+    ai_priority_label: lead.ai_priority_label || "",
+    ai_best_channel: lead.ai_best_channel || "",
+    ai_pitch: lead.ai_pitch || "",
+    contact_quality: lead.contact_quality || 0,
+    digital_strength: lead.digital_strength || 0,
+    response_chance: lead.response_chance || 0,
+    commercial_score_breakdown: lead.commercial_score_breakdown || [],
+    status: lead.status || "new",
+    instagram_url: lead.instagram_url || lead.social_links?.instagram || "",
+    facebook_url: lead.facebook_url || lead.social_links?.facebook || "",
+    linkedin_url: lead.linkedin_url || lead.social_links?.linkedin || "",
+    web_enrichment_status: lead.web_enrichment_status || "skipped",
+  };
+}
+
+function slimSearchForStorage(search: any, maxLeads = 20) {
+  const sourceLeads = Array.isArray(search.results)
+    ? search.results
+    : Array.isArray(search.leads)
+      ? search.leads
+      : [];
+
+  const slimLeads = sourceLeads
+    .slice(0, maxLeads)
+    .map((lead: Lead) => slimLeadForStorage(lead));
+
+  return {
+    id: search.id,
+    user_id: search.user_id || null,
+    niche: search.niche,
+    query: search.query,
+    city: search.city,
+    state: search.state,
+    radius_km: search.radius_km,
+    quantity: search.quantity,
+    precision: search.precision,
+    only_opportunity: search.only_opportunity,
+    results_count: search.results_count || sourceLeads.length || 0,
+    total: search.total || search.results_count || sourceLeads.length || 0,
+    credits_used: search.credits_used || 0,
+    status: search.status || "completed",
+    payload: {
+      niche: search.payload?.niche || search.niche,
+      queries: search.payload?.queries || [],
+      city: search.payload?.city || search.city,
+      state: search.payload?.state || search.state,
+      lead_objective: search.payload?.lead_objective,
+      min_score: search.payload?.min_score,
+      error: search.payload?.error || null,
+    },
+    results: slimLeads,
+    leads: slimLeads,
+    created_at: search.created_at || new Date().toISOString(),
+    local_storage_limited: sourceLeads.length > maxLeads,
+  };
+}
+
+function safeSetLocalStorage(key: string, value: unknown) {
   try {
-    localStorage.setItem("nxa_last_search_results", JSON.stringify(search));
-  } catch (error) {
-    console.error("Erro ao salvar última busca para o Radar:", error);
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error: any) {
+    if (error?.name === "QuotaExceededError") {
+      try {
+        localStorage.removeItem("nxa_search_history");
+        localStorage.removeItem("nxa_saved_leads");
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+      } catch (retryError) {
+        console.warn(`Sem espaço no localStorage para ${key}:`, retryError);
+        return false;
+      }
+    }
+
+    console.warn(`Não foi possível salvar ${key} no localStorage:`, error);
+    return false;
   }
 }
 
-function saveSearchHistoryLocal(search: any) {
+function compactLocalLeadCaches() {
   try {
     const history = safeReadArrayStorage("nxa_search_history");
-    const updated = [search, ...history].slice(0, 50);
-    localStorage.setItem("nxa_search_history", JSON.stringify(updated));
+    if (history.length) {
+      safeSetLocalStorage(
+        "nxa_search_history",
+        history.slice(0, 8).map((item: any) => slimSearchForStorage(item, 12))
+      );
+    }
+
+    const lastSearch = localStorage.getItem("nxa_last_search_results");
+    if (lastSearch) {
+      safeSetLocalStorage("nxa_last_search_results", slimSearchForStorage(JSON.parse(lastSearch), 30));
+    }
   } catch (error) {
-    console.error("Erro ao salvar histórico local:", error);
+    console.warn("Não foi possível compactar caches locais:", error);
   }
+}
+
+function saveLastSearchForRadar(search: any) {
+  const compact = slimSearchForStorage(search, 30);
+  safeSetLocalStorage("nxa_last_search_results", compact);
+}
+
+function saveSearchHistoryLocal(search: any) {
+  const compact = slimSearchForStorage(search, 12);
+  const history = safeReadArrayStorage("nxa_search_history");
+  const updated = [compact, ...history.filter((item: any) => item?.id !== compact.id)].slice(0, 8);
+  safeSetLocalStorage("nxa_search_history", updated);
 }
 
 function makeLocalLeads(params: {
@@ -1050,6 +1187,10 @@ async function searchLeads(body: any): Promise<Lead[]> {
     precision: body.precision,
     only_opportunity: body.only_opportunity,
     sales_offer: body.sales_offer,
+    lead_objective: body.lead_objective,
+    min_score: body.min_score,
+    only_with_contact: body.only_with_contact,
+    only_without_website: body.only_without_website,
     ai_scoring: body.ai_scoring,
     limit: body.quantity || body.limit || 20,
     quantity: body.quantity || body.limit || 20,
@@ -1103,6 +1244,10 @@ async function searchLeads(body: any): Promise<Lead[]> {
       linkedin_url: item.linkedin_url || item.social_links?.linkedin || item.socials?.linkedin || "",
       tiktok_url: item.tiktok_url || item.social_links?.tiktok || item.socials?.tiktok || "",
       youtube_url: item.youtube_url || item.social_links?.youtube || item.socials?.youtube || "",
+      working_hours: item.working_hours || item.opening_hours?.weekday_text?.join(" | ") || item.currentOpeningHours?.weekdayDescriptions?.join(" | ") || "",
+      contact_quality: 0,
+      digital_strength: 0,
+      response_chance: 0,
       source: "google_places",
       real_data: true,
     } as Lead;
@@ -1181,7 +1326,17 @@ function buildWebEnrichmentQueries(lead: Lead) {
   ].filter(Boolean);
 }
 
+let webEnrichmentUnavailable = false;
+
 async function enrichLeadWithWeb(lead: Lead, searchBody: any): Promise<Lead> {
+  if (webEnrichmentUnavailable) {
+    return {
+      ...lead,
+      web_enrichment_status: "skipped",
+      web_enrichment_summary: "Enriquecimento web pausado nesta sessão porque a Edge Function retornou erro. A busca principal continua funcionando.",
+    };
+  }
+
   try {
     const payload = {
       lead: {
@@ -1220,18 +1375,36 @@ async function enrichLeadWithWeb(lead: Lead, searchBody: any): Promise<Lead> {
     const { data, error } = await supabase.functions.invoke("enrich-lead-web", { body: payload });
 
     if (error) throw error;
+    if (data?.success === false || data?.error) {
+      throw new Error(data?.error || "Edge Function enrich-lead-web retornou falha.");
+    }
 
     const enrichment = data?.enrichment || data?.social_intelligence || data?.result || data || {};
     return {
       ...lead,
       ...normalizeSocialEnrichment(enrichment, lead),
     };
-  } catch (error) {
-    console.warn("Enriquecimento web não executado para lead:", lead.name, error);
+  } catch (error: any) {
+    const message = String(error?.message || error || "");
+    const isEdgeConfigProblem =
+      message.includes("400") ||
+      message.toLowerCase().includes("failed to send") ||
+      message.toLowerCase().includes("missing") ||
+      message.toLowerCase().includes("api key") ||
+      message.toLowerCase().includes("unauthorized");
+
+    if (isEdgeConfigProblem) {
+      webEnrichmentUnavailable = true;
+    } else {
+      console.warn("Enriquecimento web não executado para lead:", lead.name, error);
+    }
+
     return {
       ...lead,
-      web_enrichment_status: "failed",
-      web_enrichment_summary: "Edge Function enrich-lead-web não respondeu. Configure Tavily/Serper/Apify na função para retornar redes sociais reais.",
+      web_enrichment_status: isEdgeConfigProblem ? "skipped" : "failed",
+      web_enrichment_summary: isEdgeConfigProblem
+        ? "Enriquecimento web indisponível: revise a Edge Function enrich-lead-web e as secrets Tavily/Serper/Apify. A busca principal, score e WhatsApp continuam funcionando."
+        : "Enriquecimento web falhou para este lead, mas a busca principal continuou normalmente.",
     };
   }
 }
@@ -1290,6 +1463,310 @@ function dedupeLeads(leads: Lead[]) {
   }
 
   return Array.from(map.values());
+}
+
+function getLeadObjectiveLabel(objective?: LeadObjective) {
+  const labels: Record<LeadObjective, string> = {
+    all: "Todos os bons leads",
+    whatsapp: "Com WhatsApp/telefone",
+    no_site: "Sem site",
+    high_reviews: "Muitas avaliações",
+    social_gap: "Lacuna digital",
+    premium: "Premium/local forte",
+    new_business: "Empresas novas",
+    high_flow: "Alto fluxo local",
+    weak_instagram: "Instagram fraco",
+    no_digital_presence: "Sem presença digital",
+  };
+
+  return labels[objective || "all"];
+}
+
+function scoreLeadOpportunity(lead: Lead, context: { objective?: LeadObjective; minScore?: number; onlyWithContact?: boolean; onlyWithoutWebsite?: boolean }) {
+  const rating = Number(lead.google_rating || 0);
+  const reviews = Number(lead.google_reviews_count || 0);
+  const hasPhone = Boolean(lead.phone);
+  const hasWebsite = Boolean(lead.website);
+  const hasSocial = hasAnySocial(lead);
+
+  const hasInstagram = Boolean(lead.instagram_url || lead.social_links?.instagram);
+  const instagramFollowers = Number(lead.instagram_followers || 0);
+  const weakInstagram = !hasInstagram || (instagramFollowers > 0 && instagramFollowers < 1500);
+  const noDigitalPresence = !hasWebsite && !hasSocial;
+
+  let score = 36;
+  if (hasPhone) score += 18;
+  if (hasWebsite) score += 8;
+  else score += 14;
+  if (hasSocial) score += 8;
+  if (rating >= 4.7) score += 13;
+  else if (rating >= 4.3) score += 10;
+  else if (rating >= 4.0) score += 6;
+  if (reviews >= 250) score += 16;
+  else if (reviews >= 100) score += 12;
+  else if (reviews >= 40) score += 8;
+  else if (reviews >= 10) score += 4;
+
+  switch (context.objective || "all") {
+    case "whatsapp":
+      score += hasPhone ? 14 : -18;
+      break;
+    case "no_site":
+      score += !hasWebsite ? 18 : -8;
+      break;
+    case "high_reviews":
+      score += reviews >= 80 ? 16 : -8;
+      break;
+    case "social_gap":
+      score += !hasSocial || !hasWebsite ? 14 : -4;
+      break;
+    case "premium":
+      score += rating >= 4.5 && reviews >= 80 ? 16 : -6;
+      break;
+    case "new_business":
+      score += reviews > 0 && reviews <= 25 ? 14 : -5;
+      break;
+    case "high_flow":
+      score += reviews >= 80 ? 18 : reviews >= 40 ? 10 : -8;
+      break;
+    case "weak_instagram":
+      score += weakInstagram ? 16 : -6;
+      break;
+    case "no_digital_presence":
+      score += noDigitalPresence ? 20 : !hasWebsite ? 10 : -8;
+      break;
+  }
+
+  const finalScore = clamp(Math.round(score), 25, 99);
+  const contactQuality = clamp(Math.round((hasPhone ? 62 : 12) + (hasWebsite ? 18 : 0) + (hasSocial ? 12 : 0) + (reviews >= 20 ? 8 : 0)), 5, 100);
+  const digitalStrength = clamp(Math.round((hasWebsite ? 42 : 0) + (hasSocial ? 32 : 0) + (rating >= 4.3 ? 10 : 0) + (reviews >= 40 ? 16 : reviews >= 10 ? 8 : 0)), 0, 100);
+  const responseChance = clamp(Math.round(finalScore * 0.5 + contactQuality * 0.35 + (hasPhone ? 15 : 0)), 5, 97);
+  const pains: string[] = [];
+  if (!hasWebsite) pains.push("sem site detectado");
+  if (!hasSocial) pains.push("redes sociais não encontradas");
+  if (hasPhone) pains.push("contato direto disponível");
+  if (reviews >= 80) pains.push("alto volume de avaliações");
+  if (rating >= 4.5) pains.push("boa reputação local");
+  if (weakInstagram) pains.push("Instagram fraco ou não encontrado");
+  if (noDigitalPresence) pains.push("presença digital praticamente ausente");
+
+  const nextAction = hasPhone
+    ? "Abrir WhatsApp com mensagem personalizada e validar responsável comercial."
+    : hasWebsite
+      ? "Abrir site, capturar canal de contato e qualificar manualmente."
+      : "Pesquisar redes sociais antes de abordar.";
+
+  return {
+    ...lead,
+    score: finalScore,
+    ai_fit_score: finalScore,
+    ai_purchase_probability: responseChance,
+    ai_priority_label: finalScore >= 80 ? "Lead quente" : finalScore >= 62 ? "Bom lead" : "Qualificar",
+    ai_interest_label: getLeadObjectiveLabel(context.objective),
+    ai_pain_detected: pains.slice(0, 4),
+    ai_reason: `Score de oportunidade real: contato ${contactQuality}/100, força digital ${digitalStrength}/100, resposta ${responseChance}/100. Sinais: ${pains.slice(0, 3).join(" + ") || "dados públicos disponíveis"}.`,
+    ai_why_this_lead: `${lead.name} entrou na fila porque combina com o objetivo "${getLeadObjectiveLabel(context.objective)}" e possui sinais públicos úteis para prospecção.`,
+    ai_next_action: nextAction,
+    ai_best_channel: hasPhone ? "WhatsApp" : hasWebsite ? "Site" : "Pesquisa manual",
+    ai_pitch: buildLeadHunterApproachText({ ...lead, score: finalScore, contact_quality: contactQuality, digital_strength: digitalStrength, response_chance: responseChance }, context.objective),
+    contact_quality: contactQuality,
+    digital_strength: digitalStrength,
+    response_chance: responseChance,
+    commercial_signals: pains.slice(0, 6),
+    status: finalScore >= 80 ? "hot" : finalScore >= 62 ? "warm" : "new",
+  } as Lead;
+}
+
+
+function isDefaultOffer(offer: SalesOffer) {
+  return JSON.stringify(offer) === JSON.stringify(DEFAULT_SALES_OFFER);
+}
+
+function hasMeaningfulOffer(offer: SalesOffer) {
+  const text = [offer.name, offer.description, offer.idealCustomer, offer.painPoints, offer.differentials]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  // O default antigo não deve prender a plataforma em automação. Só ativa fit de oferta
+  // quando o usuário realmente preencheu ou editou algo.
+  return text.length >= 18 && !isDefaultOffer(offer);
+}
+
+function getDecisionLabel(score: number, offerScore?: number) {
+  if (offerScore && offerScore >= 82 && score >= 72) return "Atacar agora";
+  if (score >= 82) return "Lead quente";
+  if (score >= 68) return "Boa oportunidade";
+  if (score >= 52) return "Qualificar primeiro";
+  return "Baixa prioridade";
+}
+
+function calculateStructureScore(lead: Lead) {
+  const reviews = Number(lead.google_reviews_count || 0);
+  const rating = Number(lead.google_rating || 0);
+  const hasWebsite = Boolean(lead.website);
+  const hasPhone = Boolean(lead.phone);
+  const hasSocial = hasAnySocial(lead);
+
+  return clamp(
+    Math.round(
+      24 +
+        (hasWebsite ? 18 : 4) +
+        (hasPhone ? 12 : 0) +
+        (hasSocial ? 10 : 2) +
+        (reviews >= 250 ? 24 : reviews >= 100 ? 18 : reviews >= 40 ? 12 : reviews >= 10 ? 7 : 0) +
+        (rating >= 4.7 ? 12 : rating >= 4.3 ? 8 : rating > 0 ? 4 : 0)
+    ),
+    8,
+    98
+  );
+}
+
+function calculateFinancialPotential(lead: Lead) {
+  const reviews = Number(lead.google_reviews_count || 0);
+  const rating = Number(lead.google_rating || 0);
+  const segment = normalizeText(`${lead.segment || ""} ${lead.name || ""}`);
+  const premiumSegment = /clinica|odont|dent|imobiliaria|hotel|industria|advocacia|contabilidade|construtora|academia|escola|software|empresa|consultorio|estetica/.test(segment);
+
+  return clamp(
+    Math.round(
+      28 +
+        (premiumSegment ? 18 : 6) +
+        (reviews >= 250 ? 24 : reviews >= 100 ? 18 : reviews >= 40 ? 12 : reviews >= 10 ? 7 : 0) +
+        (rating >= 4.6 ? 10 : rating >= 4.2 ? 6 : 0) +
+        (lead.website ? 8 : 2) +
+        (lead.phone ? 7 : 0)
+    ),
+    10,
+    98
+  );
+}
+
+function applyOfferCompatibility(lead: Lead, offer: SalesOffer, enabled: boolean): Lead {
+  const commercialScore = Number(lead.ai_fit_score || lead.score || 0);
+  const structureScore = calculateStructureScore(lead);
+  const financialPotential = calculateFinancialPotential(lead);
+
+  if (!enabled || !hasMeaningfulOffer(offer)) {
+    const finalScore = clamp(Math.round(commercialScore * 0.74 + structureScore * 0.14 + financialPotential * 0.12), 1, 99);
+    return {
+      ...lead,
+      commercial_score: commercialScore,
+      structure_score: structureScore,
+      financial_potential: financialPotential,
+      final_priority_score: finalScore,
+      score: finalScore,
+      ai_fit_score: finalScore,
+      decision_label: getDecisionLabel(finalScore),
+      decision_reason: "Prioridade calculada por score comercial universal: contato, estrutura, reputação, presença digital, potencial financeiro e chance de resposta.",
+      ai_priority_label: getDecisionLabel(finalScore),
+    };
+  }
+
+  const offerAnalysis = analyzeLeadForOffer(lead, offer);
+  const offerScore = Number(offerAnalysis.ai_fit_score || offerAnalysis.score || 0);
+  const finalScore = clamp(
+    Math.round(commercialScore * 0.48 + offerScore * 0.34 + financialPotential * 0.11 + structureScore * 0.07),
+    1,
+    99
+  );
+
+  const label = getDecisionLabel(finalScore, offerScore);
+  const lowFit = offerScore < 50 && commercialScore >= 70;
+
+  return {
+    ...lead,
+    commercial_score: commercialScore,
+    offer_compatibility_score: offerScore,
+    structure_score: structureScore,
+    financial_potential: financialPotential,
+    final_priority_score: finalScore,
+    score: finalScore,
+    ai_fit_score: finalScore,
+    ai_offer_name: offer.name,
+    decision_label: lowFit ? "Bom lead, oferta fraca" : label,
+    decision_reason: lowFit
+      ? "A empresa parece comercialmente boa, mas a oferta cadastrada ainda não combina forte com esse segmento. Priorize somente se fizer sentido estratégico."
+      : `Prioridade calculada com score comercial ${commercialScore}/100 + compatibilidade da oferta ${offerScore}/100 + potencial financeiro ${financialPotential}/100.`,
+    offer_fit_summary: offerAnalysis.ai_compatibility_reason || offerAnalysis.ai_reason,
+    offer_fit_next_step: offerAnalysis.ai_next_action,
+    ai_priority_label: lowFit ? "Bom lead, oferta fraca" : label,
+    ai_offer_recommendation: offerAnalysis.ai_offer_recommendation,
+    ai_approach_summary: offerAnalysis.ai_approach_summary,
+    ai_why_this_lead: offerAnalysis.ai_why_this_lead || lead.ai_why_this_lead,
+    ai_pitch: buildUniversalOrOfferApproachText({ ...lead, score: finalScore }, offer, offerScore),
+  };
+}
+
+function buildUniversalOrOfferApproachText(lead: Lead, offer: SalesOffer, offerScore?: number) {
+  const reviews = Number(lead.google_reviews_count || 0);
+  const rating = Number(lead.google_rating || 0);
+  const offerName = offer.name?.trim();
+  const hasOffer = hasMeaningfulOffer(offer) && offerName;
+
+  const proof = reviews >= 80
+    ? `vi que vocês têm um volume forte de avaliações no Google (${reviews})`
+    : rating >= 4.5
+      ? `vi que vocês têm uma boa reputação local (${rating.toFixed(1)} no Google)`
+      : "vi o perfil de vocês no Google";
+
+  const gap = !lead.website
+    ? "Também notei que não encontrei um site claro, o que pode estar deixando oportunidades na mesa."
+    : !hasAnySocial(lead)
+      ? "Também não encontrei redes sociais fortes vinculadas ao perfil, o que pode limitar novas oportunidades."
+      : "Achei que poderia existir uma oportunidade de melhorar a captação e organização de novos contatos.";
+
+  if (hasOffer && Number(offerScore || 0) >= 55) {
+    return `Olá, tudo bem? Estava analisando empresas em ${lead.city}/${lead.state} e ${proof}. ${gap} Trabalho com ${offerName} e acredito que pode fazer sentido para a ${lead.name}. Posso te mostrar uma ideia rápida e objetiva?`;
+  }
+
+  return `Olá, tudo bem? Estava analisando empresas em ${lead.city}/${lead.state} e ${proof}. ${gap} Posso te mandar uma sugestão objetiva de melhoria para o negócio de vocês?`;
+}
+
+function buildLeadHunterApproachText(lead: Lead, objective: LeadObjective = "all") {
+  const gap = !lead.website
+    ? "notei que não encontrei um site claro de vocês no Google"
+    : (lead.google_reviews_count || 0) >= 80
+      ? `vi que vocês têm bastante movimento e ${lead.google_reviews_count} avaliações no Google`
+      : "vi o perfil de vocês no Google e achei que fazia sentido um contato rápido";
+
+  const hook = objective === "no_site"
+    ? "Tenho ajudado negócios locais a transformar presença digital e WhatsApp em mais oportunidades."
+    : objective === "whatsapp"
+      ? "Tenho uma ideia rápida para melhorar atendimento e conversão pelo WhatsApp."
+      : "Tenho uma ideia rápida para gerar e organizar mais oportunidades comerciais.";
+
+  return `Olá, tudo bem? Vi a ${lead.name} e ${gap}. ${hook} Posso te mandar uma sugestão objetiva de melhoria para o negócio de vocês?`;
+}
+
+function filterLeadByHunterRules(lead: Lead, context: { objective?: LeadObjective; minScore?: number; onlyWithContact?: boolean; onlyWithoutWebsite?: boolean }) {
+  const score = Number(lead.ai_fit_score || lead.score || 0);
+  if (score < Number(context.minScore || 0)) return false;
+  if (context.onlyWithContact && !lead.phone) return false;
+  if (context.onlyWithoutWebsite && lead.website) return false;
+
+  switch (context.objective || "all") {
+    case "whatsapp":
+      return Boolean(lead.phone);
+    case "no_site":
+      return !lead.website;
+    case "high_reviews":
+      return Number(lead.google_reviews_count || 0) >= 40;
+    case "social_gap":
+      return !hasAnySocial(lead) || !lead.website;
+    case "premium":
+      return Number(lead.google_rating || 0) >= 4.3 && Number(lead.google_reviews_count || 0) >= 40;
+    case "new_business":
+      return Number(lead.google_reviews_count || 0) > 0 && Number(lead.google_reviews_count || 0) <= 35;
+    case "high_flow":
+      return Number(lead.google_reviews_count || 0) >= 40;
+    case "weak_instagram":
+      return !lead.instagram_url || Number(lead.instagram_followers || 0) < 1500;
+    case "no_digital_presence":
+      return !lead.website && !hasAnySocial(lead);
+    default:
+      return true;
+  }
 }
 
 function shouldKeepOpportunity(lead: Lead) {
@@ -1381,7 +1858,7 @@ function onlyDigits(value?: string) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function buildWhatsAppUrl(phone?: string) {
+function buildWhatsAppUrl(phone?: string, message?: string) {
   let digits = onlyDigits(phone);
 
   if (!digits) return "";
@@ -1390,7 +1867,8 @@ function buildWhatsAppUrl(phone?: string) {
     digits = `55${digits}`;
   }
 
-  return `https://wa.me/${digits}`;
+  const text = message ? `?text=${encodeURIComponent(message)}` : "";
+  return `https://wa.me/${digits}${text}`;
 }
 
 function buildMapsUrl(lead: Lead) {
@@ -1452,7 +1930,7 @@ function exportLeadsCsv(leads: Lead[], filename = "nxa-leads.csv") {
     "Avaliacoes",
     "Score IA",
     "Probabilidade",
-    "Ticket estimado",
+    "Potencial estimado",
     "Motivo IA",
     "Proxima acao",
     "Status",
@@ -1520,6 +1998,11 @@ export function Busca() {
   const [quantity, setQuantity] = React.useState(40);
   const [precisionMode, setPrecisionMode] = React.useState(true);
   const [onlyOpportunity, setOnlyOpportunity] = React.useState(false);
+  const [leadObjective, setLeadObjective] = React.useState<LeadObjective>("all");
+  const [minScore, setMinScore] = React.useState(55);
+  const [onlyWithContact, setOnlyWithContact] = React.useState(false);
+  const [onlyWithoutWebsite, setOnlyWithoutWebsite] = React.useState(false);
+  const [autoSaveFoundLeads, setAutoSaveFoundLeads] = React.useState(true);
   const [running, setRunning] = React.useState(false);
   const [loadingHistory, setLoadingHistory] = React.useState(false);
   const [results, setResults] = React.useState<Lead[]>([]);
@@ -1529,11 +2012,16 @@ export function Busca() {
   const [savedLeadIds, setSavedLeadIds] = React.useState<string[]>([]);
   const [crmLeadIds, setCrmLeadIds] = React.useState<string[]>([]);
   const [approachLeadIds, setApproachLeadIds] = React.useState<string[]>([]);
+  const [contactedLeadIds, setContactedLeadIds] = React.useState<string[]>([]);
+  const [discardedLeadIds, setDiscardedLeadIds] = React.useState<string[]>([]);
+  const [campaignLeadIds, setCampaignLeadIds] = React.useState<string[]>([]);
+  const [followupLeadIds, setFollowupLeadIds] = React.useState<string[]>([]);
   const [offer, setOffer] = React.useState<SalesOffer>(() => readSalesOfferStorage());
   const [offerInsight, setOfferInsight] = React.useState<OfferIntelligence | null>(() => inferOfferIntelligence(readSalesOfferStorage()));
   const [analyzingOffer, setAnalyzingOffer] = React.useState(false);
   const [showOfferAdvanced, setShowOfferAdvanced] = React.useState(false);
   const [aiScoringEnabled, setAiScoringEnabled] = React.useState(true);
+  const [offerCompatibilityEnabled, setOfferCompatibilityEnabled] = React.useState(false);
   const [engineStage, setEngineStage] = React.useState(0);
   const [showSearchSetup, setShowSearchSetup] = React.useState(true);
   const [showResultsDetails, setShowResultsDetails] = React.useState(true);
@@ -1558,6 +2046,7 @@ export function Busca() {
   }, [niche]);
 
   React.useEffect(() => {
+    compactLocalLeadCaches();
     loadSearchHistory();
     loadCredits();
   }, []);
@@ -1566,6 +2055,10 @@ export function Busca() {
     setSavedLeadIds(readStringArrayStorage("nxa_saved_lead_ids"));
     setCrmLeadIds(readStringArrayStorage("nxa_crm_lead_ids"));
     setApproachLeadIds(readStringArrayStorage("nxa_approach_lead_ids"));
+    setContactedLeadIds(readStringArrayStorage("nxa_contacted_lead_ids"));
+    setDiscardedLeadIds(readStringArrayStorage("nxa_discarded_lead_ids"));
+    setCampaignLeadIds(readStringArrayStorage("nxa_campaign_lead_ids"));
+    setFollowupLeadIds(readStringArrayStorage("nxa_followup_lead_ids"));
   }, []);
 
   React.useEffect(() => {
@@ -1893,7 +2386,8 @@ export function Busca() {
         payload: {
           ...lead,
           search: searchBody,
-          offer: searchBody.sales_offer,
+          lead_objective: searchBody.lead_objective,
+          min_score: searchBody.min_score,
           saved_automatically: true,
         },
       }));
@@ -2070,21 +2564,41 @@ export function Busca() {
       quantity,
       precision: precisionMode,
       only_opportunity: onlyOpportunity,
-      sales_offer: offer,
+      lead_objective: leadObjective,
+      min_score: minScore,
+      only_with_contact: onlyWithContact,
+      only_without_website: onlyWithoutWebsite,
+      auto_save_found_leads: autoSaveFoundLeads,
       ai_scoring: aiScoringEnabled,
+      offer_compatibility: offerCompatibilityEnabled && hasMeaningfulOffer(offer),
+      sales_offer: offerCompatibilityEnabled && hasMeaningfulOffer(offer) ? offer : null,
       web_enrichment: true,
+      enrichment_layers: [
+        "google_places",
+        "web_search_tavily_serper",
+        "social_apify",
+        "cnpj_brasilapi_receitaws",
+        "phone_whatsapp_validation",
+        "ai_classification",
+      ],
     };
 
     try {
       const rawLeads = await searchLeads(body);
-      const scoredLeads = aiScoringEnabled
-        ? rawLeads.map((lead) => analyzeLeadForOffer(lead, offer))
+      const hunterContext = { objective: leadObjective, minScore, onlyWithContact, onlyWithoutWebsite };
+      const commerciallyScoredLeads = aiScoringEnabled
+        ? rawLeads.map((lead) => scoreLeadOpportunity(lead, hunterContext))
         : rawLeads;
 
+      const scoredLeads = commerciallyScoredLeads.map((lead) =>
+        applyOfferCompatibility(lead, offer, offerCompatibilityEnabled)
+      );
+
       const dedupedLeads = dedupeLeads(scoredLeads);
+      const hunterFiltered = dedupedLeads.filter((lead) => filterLeadByHunterRules(lead, hunterContext));
       const filteredLeads = onlyOpportunity
-        ? dedupedLeads.filter(shouldKeepOpportunity)
-        : dedupedLeads;
+        ? hunterFiltered.filter(shouldKeepOpportunity)
+        : hunterFiltered;
 
       // Se o filtro de oportunidade ficar agressivo demais, não deixa a tela
       // parecer quebrada: mostra os melhores leads encontrados e mantém o score
@@ -2109,11 +2623,15 @@ export function Busca() {
         queries: built.queries,
         quantity,
         results_count: leads.length,
-        sales_offer: offer,
+        lead_objective: leadObjective,
+        min_score: minScore,
         ai_scoring: aiScoringEnabled,
+        offer_compatibility: offerCompatibilityEnabled && hasMeaningfulOffer(offer),
       });
 
-      const persistence = await saveLeadsToDatabase(leads, body);
+      const persistence = autoSaveFoundLeads
+        ? await saveLeadsToDatabase(leads, body)
+        : { saved: 0, failed: false };
 
       setResults(leads);
 
@@ -2186,11 +2704,11 @@ export function Busca() {
   const visibleSearches = React.useMemo(() => searches.slice(0, visibleHistoryCount), [searches, visibleHistoryCount]);
 
   const engineSteps = [
-    "Interpretando intenção comercial",
-    "Consultando base histórica",
-    "Deduplicando oportunidades",
-    "Enriquecendo sinais públicos",
-    "Priorizando abordagem de venda",
+    "Mapeando nicho e região",
+    "Consultando Google Places",
+    "Removendo duplicados",
+    "Enriquecendo redes e site",
+    "Ranqueando melhores leads",
   ];
 
   const handleExportCsv = () => {
@@ -2248,6 +2766,58 @@ export function Busca() {
       return next;
     });
   }, []);
+
+  const markContacted = React.useCallback((lead: Lead) => {
+    setContactedLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_contacted_lead_ids", next);
+      return next;
+    });
+    upsertLocalStorageItem("nxa_contacted_leads", { ...lead, contacted_at: new Date().toISOString() });
+    toast({ title: "Lead marcado como contatado", description: `${lead.name} saiu da fila fria e ficou registrado no histórico.` });
+  }, [toast]);
+
+  const markDiscarded = React.useCallback((lead: Lead) => {
+    setDiscardedLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_discarded_lead_ids", next);
+      return next;
+    });
+    upsertLocalStorageItem("nxa_discarded_leads", { ...lead, discarded_at: new Date().toISOString() });
+    toast({ title: "Lead descartado", description: `${lead.name} foi removido da prospecção prioritária.` });
+  }, [toast]);
+
+  const addToCampaign = React.useCallback((lead: Lead) => {
+    setCampaignLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_campaign_lead_ids", next);
+      return next;
+    });
+    upsertLocalStorageItem("nxa_campaign_leads", { ...lead, campaign_added_at: new Date().toISOString(), message: buildLeadHunterApproachText(lead, leadObjective) });
+    toast({ title: "Lead adicionado à campanha", description: "Mensagem individual salva para envio semi-automático, evitando disparo em massa." });
+  }, [leadObjective, toast]);
+
+  const createFollowup = React.useCallback((lead: Lead) => {
+    setFollowupLeadIds((current) => {
+      const next = Array.from(new Set([...current, lead.id]));
+      writeStringArrayStorage("nxa_followup_lead_ids", next);
+      return next;
+    });
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    upsertLocalStorageItem("nxa_followups", {
+      id: `followup-${lead.id}`,
+      lead_id: lead.id,
+      title: `Follow-up ${lead.name}`,
+      channel: lead.phone ? "WhatsApp" : lead.website ? "Site" : "Maps",
+      date: tomorrow.toISOString(),
+      priority: (lead.score || 0) >= 80 ? "alta" : "media",
+      status: "pending",
+      notes: lead.ai_next_action || "Retomar contato e validar interesse.",
+      lead,
+    });
+    toast({ title: "Follow-up criado", description: `Próximo contato de ${lead.name} salvo para amanhã.` });
+  }, [toast]);
 
   const handleSaveLead = async (lead: Lead) => {
     if (savedLeadIds.includes(lead.id)) {
@@ -2329,7 +2899,7 @@ export function Busca() {
         score: lead.ai_fit_score || lead.score || 0,
         value: 0,
         source: "busca_inteligente_ia",
-        notes: `Lead enviado pela Busca Inteligente IA. Oferta: ${offer.name}. Score: ${lead.ai_fit_score || lead.score}/100. Probabilidade: ${lead.ai_purchase_probability || "—"}%. Motivo: ${lead.ai_reason || getOpportunityReason(lead)}. Próxima ação: ${lead.ai_next_action || "Qualificar lead."}`,
+        notes: `Lead enviado pelo NXA Lead Hunter. Objetivo: ${getLeadObjectiveLabel(leadObjective)}. Score: ${lead.ai_fit_score || lead.score}/100. Probabilidade: ${lead.ai_purchase_probability || "—"}%. Motivo: ${lead.ai_reason || getOpportunityReason(lead)}. Próxima ação: ${lead.ai_next_action || "Qualificar lead."}`,
         payload: lead,
       };
 
@@ -2353,7 +2923,7 @@ export function Busca() {
   };
 
   const handleGenerateApproach = async (lead: Lead) => {
-    const text = buildApproachText(lead, offer);
+    const text = buildLeadHunterApproachText(lead, leadObjective);
     markApproachGenerated(lead);
 
     try {
@@ -2392,7 +2962,7 @@ export function Busca() {
   };
 
   const handleOpenWhatsApp = (lead: Lead) => {
-    const url = buildWhatsAppUrl(lead.phone);
+    const url = buildWhatsAppUrl(lead.phone, buildLeadHunterApproachText(lead, leadObjective));
 
     if (!url) {
       toast({
@@ -2571,7 +3141,7 @@ export function Busca() {
               </h1>
 
               <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground md:text-base">
-                A busca deixa de ser uma lista comum e vira um motor comercial: consulta a base, evita repetição, cruza oferta com sinais públicos, ranqueia o fit e entrega as próximas oportunidades para abordagem.
+                Pesquise qualquer nicho em qualquer cidade e receba uma lista priorizada de empresas com maior chance de virar cliente: contato, força digital, avaliações, Maps, redes, score comercial e mensagem semi-automática para WhatsApp.
               </p>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -2632,7 +3202,7 @@ export function Busca() {
         <CollapsibleShell
           title="Configuração da busca"
           eyebrow="Search cockpit"
-          description="Oferta, nicho, região e limites ficam recolhíveis para deixar a experiência menos poluída após configurar."
+          description="Nicho, região, objetivo e filtros comerciais ficam recolhíveis para deixar a tela leve depois da configuração."
           open={showSearchSetup}
           onToggle={() => setShowSearchSetup((current) => !current)}
           rightSlot={<span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-black text-primary">{mode === "catalogo" ? "Catálogo IA" : "Busca livre"}</span>}
@@ -2647,106 +3217,128 @@ export function Busca() {
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-sm font-bold">
-                  <Wand2 className="h-4 w-4 text-primary" />
-                  Oferta que a IA deve vender
+                  <BrainCircuit className="h-4 w-4 text-primary" />
+                  Lead Hunter avançado
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Quanto melhor essa oferta, mais precisa fica a priorização.
+                  Escolha a intenção comercial da pesquisa. A IA ranqueia por sinais reais: contato, reputação, presença digital, fluxo local, chance de resposta e potencial comercial.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" onClick={analyzeAndFillOffer} disabled={analyzingOffer} className="h-9 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white shadow-lg shadow-primary/10">
-                  {analyzingOffer ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
-                  Analisar oferta
-                </Button>
-                <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={aiScoringEnabled}
-                    onChange={(event) => setAiScoringEnabled(event.target.checked)}
-                    className="h-4 w-4 accent-primary"
-                  />
-                  IA ativa
-                </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={aiScoringEnabled}
+                  onChange={(event) => setAiScoringEnabled(event.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                Score IA
+              </label>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              {[
+                { key: "all", title: "Melhores leads", desc: "equilíbrio entre contato, reputação e lacuna" },
+                { key: "whatsapp", title: "Com WhatsApp", desc: "prioriza telefone para abordagem rápida" },
+                { key: "no_site", title: "Sem site", desc: "ótimo para vender presença digital" },
+                { key: "high_reviews", title: "Muitas avaliações", desc: "negócios com demanda e movimento" },
+                { key: "social_gap", title: "Lacuna digital", desc: "sem redes fortes ou site claro" },
+                { key: "premium", title: "Premium local", desc: "boa nota + volume de avaliações" },
+                { key: "new_business", title: "Empresas novas", desc: "poucas avaliações e chance de vender estrutura" },
+                { key: "high_flow", title: "Alto fluxo local", desc: "muitas avaliações e demanda aparente" },
+                { key: "weak_instagram", title: "Instagram fraco", desc: "rede ausente ou pouco forte" },
+                { key: "no_digital_presence", title: "Sem presença digital", desc: "sem site e sem redes encontradas" },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setLeadObjective(item.key as LeadObjective)}
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition-all",
+                    leadObjective === item.key
+                      ? "border-primary bg-primary/15 shadow-lg shadow-primary/10"
+                      : "border-border bg-background/50 hover:border-primary/40 hover:bg-muted/40"
+                  )}
+                >
+                  <div className="text-sm font-black">{item.title}</div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{item.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">Filtro de qualidade</div>
+                <span className="rounded-full border border-primary/25 bg-background/60 px-2.5 py-1 text-[10px] font-black text-primary">mín. {minScore}/100</span>
+              </div>
+              <input
+                type="range"
+                min={30}
+                max={90}
+                value={minScore}
+                onChange={(event) => setMinScore(Number(event.target.value))}
+                className="w-full accent-primary"
+              />
+              <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
+                <span>Mais volume</span>
+                <span>Mais qualidade</span>
               </div>
             </div>
 
-            {offerInsight && (
-              <div className="mb-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm font-black">
-                    <BrainCircuit className="h-4 w-4 text-primary" />
-                    Mini análise da oferta
-                  </div>
-                  <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10px] font-black text-primary">
-                    {offerInsight.confidence}% confiança
-                  </span>
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">{offerInsight.summary}</p>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <div className="rounded-xl border border-border/70 bg-background/45 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Oferta analisada</p>
-                    <p className="mt-1 text-xs leading-relaxed">{offer.description || offer.name || "Preencha a oferta para melhorar a análise."}</p>
-                  </div>
-                  <div className="rounded-xl border border-border/70 bg-background/45 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Como a busca vai usar isso</p>
-                    <p className="mt-1 text-xs leading-relaxed">A busca vai procurar empresas com maior chance de comprar ou indicar essa oferta, usando cliente ideal, segmento, localização, contato, site, avaliações e aderência comercial.</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {offerInsight.suggestedQueries.slice(0, 6).map((query) => (
-                    <button key={query} type="button" onClick={() => { setMode("custom"); setCustomQueries((current) => Array.from(new Set([...current, query]))); }} className="rounded-full border border-primary/20 bg-background/50 px-3 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary/10">
-                      + {query}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Nome da oferta">
-                <input value={offer.name} onChange={(event) => updateOffer("name", event.target.value)} placeholder="Automação WhatsApp com IA" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
-              </Field>
-              <Field label="Preço / ticket">
-                <input value={offer.price} onChange={(event) => updateOffer("price", event.target.value)} placeholder="R$497/mês" className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
-              </Field>
+            <div className="mt-4 grid gap-2">
+              <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border bg-background/50 px-3 py-2 text-xs">
+                <span>Mostrar só leads com telefone/WhatsApp</span>
+                <input type="checkbox" checked={onlyWithContact} onChange={(event) => setOnlyWithContact(event.target.checked)} className="h-4 w-4 accent-primary" />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border bg-background/50 px-3 py-2 text-xs">
+                <span>Mostrar só empresas sem site detectado</span>
+                <input type="checkbox" checked={onlyWithoutWebsite} onChange={(event) => setOnlyWithoutWebsite(event.target.checked)} className="h-4 w-4 accent-primary" />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between rounded-xl border border-border bg-background/50 px-3 py-2 text-xs">
+                <span>Salvar automaticamente os leads encontrados</span>
+                <input type="checkbox" checked={autoSaveFoundLeads} onChange={(event) => setAutoSaveFoundLeads(event.target.checked)} className="h-4 w-4 accent-primary" />
+              </label>
             </div>
 
-            <div className="mt-3">
-              <Field label="Cliente ideal">
-                <input value={offer.idealCustomer} onChange={(event) => updateOffer("idealCustomer", event.target.value)} placeholder="Clínicas, barbearias, estética, dentistas..." className="h-11 w-full rounded-xl border border-border bg-background/80 px-3 text-sm outline-none focus:border-primary" />
-              </Field>
-            </div>
-
-            <div className="mt-3">
-              <Field label="Descrição curta do produto">
-                <textarea value={offer.description} onChange={(event) => updateOffer("description", event.target.value)} rows={4} placeholder="O que você vende, para quem e qual resultado promete." className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
-              </Field>
-            </div>
-
-            <button type="button" onClick={() => setShowOfferAdvanced((current) => !current)} className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
-              {showOfferAdvanced ? "Ocultar inteligência avançada" : "Configurar dores, objeções e diferenciais"}
-              <ArrowUpRight className="h-3 w-3" />
-            </button>
-
-            <AnimatePresence>
-              {showOfferAdvanced && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                  <div className="mt-3 grid gap-3">
-                    <Field label="Dores que resolve">
-                      <textarea value={offer.painPoints} onChange={(event) => updateOffer("painPoints", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
-                    </Field>
-                    <Field label="Diferenciais">
-                      <textarea value={offer.differentials} onChange={(event) => updateOffer("differentials", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
-                    </Field>
-                    <Field label="Objeções comuns">
-                      <textarea value={offer.objections} onChange={(event) => updateOffer("objections", event.target.value)} rows={3} className="w-full rounded-xl border border-border bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary" />
-                    </Field>
+            <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+              <label className="flex cursor-pointer items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-primary">
+                    <Wand2 className="h-3.5 w-3.5" /> Compatibilidade com minha oferta
                   </div>
-                </motion.div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Mantém o score comercial universal para qualquer nicho e adiciona uma segunda nota: o quanto esse lead combina com o produto/serviço que o usuário vende.
+                  </p>
+                </div>
+                <input type="checkbox" checked={offerCompatibilityEnabled} onChange={(event) => setOfferCompatibilityEnabled(event.target.checked)} className="mt-1 h-4 w-4 accent-primary" />
+              </label>
+
+              {offerCompatibilityEnabled && (
+                <div className="mt-4 grid gap-2">
+                  <input value={offer.name} onChange={(event) => updateOffer("name", event.target.value)} placeholder="O que você vende? Ex: Curso para dentistas, energia solar, software, móveis corporativos..." className="h-10 w-full rounded-xl border border-border bg-background/80 px-3 text-xs outline-none focus:border-primary" />
+                  <textarea value={offer.description} onChange={(event) => updateOffer("description", event.target.value)} placeholder="Descreva rapidamente o produto, quem compra e qual dor resolve." rows={3} className="w-full resize-none rounded-xl border border-border bg-background/80 px-3 py-2 text-xs outline-none focus:border-primary" />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={cn("text-[10px] font-bold", hasMeaningfulOffer(offer) ? "text-emerald-300" : "text-orange-300")}>
+                      {hasMeaningfulOffer(offer) ? "Fit de oferta ativo" : "Preencha uma oferta real para ativar o fit"}
+                    </span>
+                    <Button type="button" size="sm" variant="secondary" className="h-8 rounded-xl text-xs" onClick={analyzeAndFillOffer} disabled={analyzingOffer}>
+                      {analyzingOffer ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
+                      Melhorar oferta
+                    </Button>
+                  </div>
+                </div>
               )}
-            </AnimatePresence>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-border/70 bg-background/45 p-4">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
+                <Lightbulb className="h-3.5 w-3.5 text-primary" />
+                Estratégia atual
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                A busca vai procurar <strong className="text-foreground">{getLeadObjectiveLabel(leadObjective)}</strong> em {city}/{state}, enriquecer redes sociais quando possível, limitar a exibição para não travar a tela e gerar mensagem individual para WhatsApp.
+              </p>
+            </div>
           </motion.div>
 
           <motion.div
@@ -2878,7 +3470,7 @@ export function Busca() {
                 Oportunidades priorizadas
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Não é uma lista: é uma fila de abordagem com fit, dor provável, ticket e próxima ação.
+                Não é uma lista comum: é uma fila de abordagem com score, contato, lacuna digital, reputação e próxima ação.
               </p>
             </div>
 
@@ -2946,11 +3538,11 @@ export function Busca() {
               Configure a missão e inicie a varredura inteligente.
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-2">
               {visibleResults.map((lead, index) => (
                 <div key={lead.id} className="relative">
                   {index < 3 && <div className="absolute -top-2 left-4 z-10 rounded-full border border-orange-400/40 bg-orange-500/15 px-2 py-0.5 text-[10px] font-black text-orange-300">TOP {index + 1}</div>}
-                  <LeadCard lead={lead} saved={savedLeadIds.includes(lead.id)} inCrm={crmLeadIds.includes(lead.id)} approachGenerated={approachLeadIds.includes(lead.id)} onSave={handleSaveLead} onSendToCrm={handleSendToCrm} onGenerateApproach={handleGenerateApproach} onOpenWebsite={handleOpenWebsite} onOpenMaps={handleOpenMaps} onOpenWhatsApp={handleOpenWhatsApp} />
+                  <LeadCard lead={lead} saved={savedLeadIds.includes(lead.id)} inCrm={crmLeadIds.includes(lead.id)} approachGenerated={approachLeadIds.includes(lead.id)} contacted={contactedLeadIds.includes(lead.id)} discarded={discardedLeadIds.includes(lead.id)} inCampaign={campaignLeadIds.includes(lead.id)} hasFollowup={followupLeadIds.includes(lead.id)} onSave={handleSaveLead} onSendToCrm={handleSendToCrm} onGenerateApproach={handleGenerateApproach} onMarkContacted={markContacted} onDiscard={markDiscarded} onAddToCampaign={addToCampaign} onCreateFollowup={createFollowup} onOpenWebsite={handleOpenWebsite} onOpenMaps={handleOpenMaps} onOpenWhatsApp={handleOpenWhatsApp} />
                 </div>
               ))}
             </div>
@@ -3226,14 +3818,108 @@ function SummaryCard({
   );
 }
 
+function getPotentialLabel(lead: Lead) {
+  const score = Number(lead.ai_fit_score || lead.score || 0);
+  const reviews = Number(lead.google_reviews_count || 0);
+  const rating = Number(lead.google_rating || 0);
+  const hasPhone = Boolean(lead.phone);
+
+  if (score >= 88 && reviews >= 120 && hasPhone) return "Premium";
+  if (score >= 76 && (reviews >= 50 || rating >= 4.5)) return "Alto";
+  if (score >= 58) return "Médio";
+  return "Baixo";
+}
+
+function getPrimaryOpportunityBullets(lead: Lead) {
+  const signals = lead.commercial_signals || lead.ai_pain_detected || [];
+  const bullets: string[] = [];
+
+  if ((lead.google_reviews_count || 0) >= 80) bullets.push("Alto volume de avaliações");
+  if (lead.phone) bullets.push("WhatsApp/telefone disponível");
+  if (!lead.website) bullets.push("Presença digital abaixo do potencial");
+  if (hasAnySocial(lead) && (lead.instagram_followers || 0) < 1500) bullets.push("Rede social com espaço para crescer");
+  if ((lead.google_rating || 0) >= 4.5) bullets.push("Boa reputação local");
+
+  for (const signal of signals) {
+    if (bullets.length >= 4) break;
+    const clean = String(signal || "").trim();
+    if (clean && !bullets.some((item) => normalizeText(item) === normalizeText(clean))) {
+      bullets.push(capitalizeWords(clean));
+    }
+  }
+
+  return bullets.slice(0, 4).length
+    ? bullets.slice(0, 4)
+    : ["Dados públicos suficientes para qualificação", "Validar responsável antes da proposta"];
+}
+
+function getRecommendedActionBullets(lead: Lead) {
+  const bullets: string[] = [];
+
+  if (lead.phone) bullets.push("Chamar no WhatsApp");
+  else if (lead.website) bullets.push("Abrir site e capturar contato");
+  else bullets.push("Validar contato no Maps");
+
+  if ((lead.google_reviews_count || 0) >= 80) bullets.push("Citar volume de avaliações");
+  if (!lead.website || !hasAnySocial(lead)) bullets.push("Falar sobre presença digital");
+  bullets.push("Validar responsável comercial");
+  bullets.push("Não começar pelo preço");
+
+  return bullets.slice(0, 4);
+}
+
+function getScoreBreakdown(lead: Lead) {
+  const rating = Number(lead.google_rating || 0);
+  const reviews = Number(lead.google_reviews_count || 0);
+  const hasPhone = Boolean(lead.phone);
+  const hasWebsite = Boolean(lead.website);
+  const hasSocial = hasAnySocial(lead);
+  const score = Number(lead.ai_fit_score || lead.score || 0);
+
+  const rows = [
+    { label: "WhatsApp/telefone encontrado", points: hasPhone ? 20 : 0, active: hasPhone },
+    { label: reviews >= 80 ? "Muitas avaliações no Google" : "Avaliações moderadas", points: reviews >= 250 ? 20 : reviews >= 80 ? 18 : reviews >= 40 ? 12 : reviews >= 10 ? 8 : 0, active: reviews >= 10 },
+    { label: "Nota 4.5+", points: rating >= 4.5 ? 14 : rating >= 4.0 ? 8 : 0, active: rating >= 4.0 },
+    { label: hasWebsite ? "Site ativo" : "Lacuna: sem site claro", points: hasWebsite ? 8 : 14, active: true },
+    { label: hasSocial ? "Redes encontradas" : "Lacuna em redes sociais", points: hasSocial ? 8 : 12, active: true },
+    { label: "Score comercial consolidado", points: Math.max(0, Math.round(score / 5)), active: score >= 55 },
+  ];
+
+  return rows.filter((row) => row.points > 0).slice(0, 6);
+}
+
+function MetricBar({ label, value }: { label: string; value: number }) {
+  const safeValue = clamp(Number(value || 0), 0, 100);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+        <span>{label}</span>
+        <span className="text-foreground">{safeValue}/100</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full border border-border bg-muted/30">
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${safeValue}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function LeadCard({
   lead,
   saved,
   inCrm,
   approachGenerated,
+  contacted,
+  discarded,
+  inCampaign,
+  hasFollowup,
   onSave,
   onSendToCrm,
   onGenerateApproach,
+  onMarkContacted,
+  onDiscard,
+  onAddToCampaign,
+  onCreateFollowup,
   onOpenWebsite,
   onOpenMaps,
   onOpenWhatsApp,
@@ -3242,122 +3928,149 @@ function LeadCard({
   saved: boolean;
   inCrm: boolean;
   approachGenerated: boolean;
+  contacted: boolean;
+  discarded: boolean;
+  inCampaign: boolean;
+  hasFollowup: boolean;
   onSave: (lead: Lead) => void;
   onSendToCrm: (lead: Lead) => void;
   onGenerateApproach: (lead: Lead) => void;
+  onMarkContacted: (lead: Lead) => void;
+  onDiscard: (lead: Lead) => void;
+  onAddToCampaign: (lead: Lead) => void;
+  onCreateFollowup: (lead: Lead) => void;
   onOpenWebsite: (lead: Lead) => void;
   onOpenMaps: (lead: Lead) => void;
   onOpenWhatsApp: (lead: Lead) => void;
 }) {
-  const scoreColor = getScoreColor(lead.score || 0);
+  const score = Number(lead.ai_fit_score || lead.score || 0);
+  const scoreColor = getScoreColor(score);
   const hasWebsite = Boolean(lead.website);
   const hasPhone = Boolean(lead.phone);
-  const opportunityReason = getOpportunityReason(lead);
+  const contactQuality = Number(lead.contact_quality || (hasPhone ? 78 : 18));
+  const digitalStrength = Number(lead.digital_strength || (hasWebsite ? 62 : 28));
+  const responseChance = Number(lead.response_chance || lead.ai_purchase_probability || score || 0);
+  const commercialScore = Number(lead.commercial_score || score);
+  const offerScore = Number(lead.offer_compatibility_score || 0);
+  const financialPotential = Number(lead.financial_potential || 0);
+  const structureScore = Number(lead.structure_score || 0);
+  const potential = getPotentialLabel(lead);
+  const opportunityBullets = getPrimaryOpportunityBullets(lead);
+  const actionBullets = getRecommendedActionBullets(lead);
+  const breakdown = getScoreBreakdown(lead);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="group overflow-hidden rounded-xl border bg-background/60 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
-      style={{
-        borderColor: `${scoreColor}33`,
-      }}
+      className="group overflow-hidden rounded-2xl border bg-background/70 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-xl hover:shadow-primary/10"
+      style={{ borderColor: `${scoreColor}3D` }}
     >
-      <div
-        className="h-1 w-full"
-        style={{
-          background: `linear-gradient(90deg, ${scoreColor}, transparent)`,
-        }}
-      />
+      <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${scoreColor}, transparent 75%)` }} />
 
-      <div className="p-4">
-        <div className="mb-3 flex items-start justify-between gap-3">
+      <div className="p-4 lg:p-5">
+        <div className="mb-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-bold">
-              {lead.name || "Empresa sem nome"}
-            </h3>
-
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {lead.segment || "Segmento não informado"}
-            </p>
+            <div className="flex items-center gap-2">
+              <h3 className="truncate text-base font-black tracking-tight text-foreground">{lead.name || "Empresa sem nome"}</h3>
+              {contacted && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] font-black text-emerald-300">contatado</span>}
+            </div>
+            <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">{lead.segment || "Segmento não informado"}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />{lead.google_rating ? lead.google_rating.toFixed(1) : "—"} ({lead.google_reviews_count || 0})</span>
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{lead.city}/{lead.state}</span>
+            </div>
           </div>
 
           <div className="shrink-0 text-right">
-            <div
-              className="flex items-center justify-end gap-1 text-sm font-black"
-              style={{ color: scoreColor }}
-            >
-              {getScoreIcon(lead.score || 0)}
-              {lead.score || 0}
+            <div className="inline-flex items-center gap-1.5 rounded-2xl border bg-card/70 px-3 py-2" style={{ borderColor: `${scoreColor}55`, color: scoreColor }}>
+              {getScoreIcon(score)}
+              <span className="text-2xl font-black leading-none">{score}</span>
+              <span className="text-[10px] font-black">/100</span>
             </div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-wider" style={{ color: scoreColor }}>{lead.ai_priority_label || getScoreLabel(score)}</div>
+          </div>
+        </div>
 
-            <div
-              className="text-[9px] font-bold uppercase tracking-wider"
-              style={{ color: scoreColor }}
-            >
-              {getScoreLabel(lead.score || 0)}
+        <div className="mb-4 grid gap-3 md:grid-cols-[0.95fr_1.05fr]">
+          <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-primary">
+                <Target className="h-3.5 w-3.5" /> Oportunidade
+              </div>
+              <span className="rounded-full border border-primary/25 bg-background/70 px-2.5 py-1 text-[10px] font-black text-primary">{potential}</span>
+            </div>
+            <ul className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
+              {opportunityBullets.map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card/45 p-4">
+            <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
+              <BarChart3 className="h-3.5 w-3.5 text-primary" /> Diagnóstico visual
+            </div>
+            <div className="space-y-3">
+              <MetricBar label="Comercial" value={commercialScore} />
+              {offerScore > 0 ? <MetricBar label="Fit da oferta" value={offerScore} /> : null}
+              <MetricBar label="Contato" value={contactQuality} />
+              <MetricBar label="Digital" value={digitalStrength} />
+              <MetricBar label="Resposta" value={responseChance} />
+              {structureScore > 0 ? <MetricBar label="Estrutura" value={structureScore} /> : null}
+              {financialPotential > 0 ? <MetricBar label="Financeiro" value={financialPotential} /> : null}
             </div>
           </div>
         </div>
 
-        <div className="mb-3 rounded-2xl border border-primary/20 bg-primary/5 p-3.5">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary">
-                <BrainCircuit className="h-3.5 w-3.5" />
-                Resumo da IA
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                {lead.ai_customer_summary || lead.ai_reason || `A NXA encontrou este lead por ${opportunityReason}.`}
-              </p>
+        <div className="mb-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-cyan-300">
+              <Lightbulb className="h-3.5 w-3.5" /> Ação recomendada
             </div>
-            <span className="shrink-0 rounded-full border border-primary/25 bg-background/70 px-2.5 py-1 text-[10px] font-black text-primary">
-              {lead.ai_priority_label || getCustomerPriorityLabel(lead.score || 0)}
-            </span>
+            <ul className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
+              {actionBullets.map((item, index) => (
+                <li key={item} className="flex items-start gap-2">
+                  {index === actionBullets.length - 1 && item.includes("Não") ? <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-300" /> : <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />}
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
           </div>
 
-          <div className="grid gap-2">
-            <InsightRow
-              label="Por que apareceu?"
-              value={lead.ai_why_this_lead || `Este lead apareceu porque possui ${opportunityReason}.`}
-            />
-            <InsightRow
-              label="O que vender?"
-              value={lead.ai_offer_recommendation || `Apresente a oferta como uma forma prática de melhorar o resultado comercial desse negócio.`}
-            />
-            <InsightRow
-              label="Oportunidade detectada"
-              value={lead.ai_opportunity || `Existe sinal comercial para abordagem, mas vale validar a dor antes da proposta.`}
-            />
-          </div>
-
-          <div className="mt-3 rounded-xl border border-border bg-background/55 p-3">
-            <div className="flex items-start gap-2">
-              <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Melhor abordagem</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  {lead.ai_approach_summary || lead.ai_next_action || "Comece com uma pergunta de diagnóstico e só depois apresente a oferta."}
-                </p>
-              </div>
+          <div className="rounded-2xl border border-border bg-background/50 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Por que vale abordar?
+            </div>
+            <div className="space-y-1.5">
+              {breakdown.map((item) => (
+                <div key={item.label} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-[11px]">
+                  <span className="truncate text-muted-foreground">{item.label}</span>
+                  <span className="shrink-0 font-black text-emerald-300">+{item.points}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="space-y-1.5">
+        {(lead.decision_reason || lead.offer_fit_summary) && (
+          <div className="mb-4 rounded-2xl border border-primary/20 bg-primary/[0.04] p-4">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-primary">
+              <BrainCircuit className="h-3.5 w-3.5" /> Decisão da IA
+            </div>
+            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">{lead.decision_reason}</p>
+            {lead.offer_fit_summary ? <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Fit da oferta: {lead.offer_fit_summary}</p> : null}
+          </div>
+        )}
+
+        <div className="space-y-1.5 rounded-2xl border border-border bg-card/35 p-3">
           <Info icon={MapPin}>{lead.address || "Endereço não informado"}</Info>
-
-          {hasPhone ? (
-            <Info icon={Phone}>{lead.phone}</Info>
-          ) : (
-            <Info icon={Phone}>Telefone não informado</Info>
-          )}
-
-          {hasWebsite ? (
-            <Info icon={Globe}>{lead.website}</Info>
-          ) : (
-            <Info icon={Globe}>Sem website detectado</Info>
-          )}
+          <Info icon={Phone}>{hasPhone ? lead.phone : "Telefone não informado"}</Info>
+          <Info icon={Globe}>{hasWebsite ? lead.website : "Sem website detectado"}</Info>
+          {lead.working_hours ? <Info icon={RefreshCw}>{lead.working_hours}</Info> : null}
         </div>
 
         <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-3">
@@ -3378,119 +4091,59 @@ function LeadCard({
           {lead.instagram_followers ? <p className="mt-2 text-[11px] text-muted-foreground">Instagram: {new Intl.NumberFormat("pt-BR").format(lead.instagram_followers)} seguidores{lead.instagram_bio ? ` · ${lead.instagram_bio}` : ""}</p> : null}
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <LeadDecisionMetric
-            label="Interesse"
-            value={lead.ai_interest_label || getInterestLabel(lead.ai_purchase_probability || lead.score || 0)}
-          />
-          <LeadDecisionMetric
-            label="Canal"
-            value={lead.ai_best_channel || (hasPhone ? "WhatsApp" : hasWebsite ? "Site" : "Maps")}
-          />
-          <LeadDecisionMetric
-            label="Reviews"
-            value={lead.google_reviews_count || 0}
-          />
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
+        <div className="mt-4 grid gap-2 border-t border-border pt-4 sm:grid-cols-3">
           <Button
-            variant={approachGenerated ? "outline" : "secondary"}
             size="sm"
-            className="h-8 flex-1 gap-1.5"
-            onClick={() => onGenerateApproach(lead)}
-          >
-            {approachGenerated ? (
-              <Check className="h-3.5 w-3.5 text-emerald-400" />
-            ) : (
-              <BrainCircuit className="h-3.5 w-3.5" />
-            )}
-            {approachGenerated ? "Copiada" : "Abordagem IA"}
-          </Button>
-
-          <Button
-            variant={saved ? "secondary" : "outline"}
-            size="sm"
-            className="h-8 flex-1 gap-1.5"
-            onClick={() => onSave(lead)}
-          >
-            {saved ? (
-              <Check className="h-3.5 w-3.5 text-emerald-400" />
-            ) : (
-              <BookmarkPlus className="h-3.5 w-3.5" />
-            )}
-            {saved ? "Salvo" : "Salvar"}
-          </Button>
-
-          <Button
-            variant={inCrm ? "secondary" : "outline"}
-            size="sm"
-            className="h-8 flex-1 gap-1.5"
-            onClick={() => onSendToCrm(lead)}
-          >
-            {inCrm ? (
-              <Check className="h-3.5 w-3.5 text-emerald-400" />
-            ) : (
-              <Send className="h-3.5 w-3.5" />
-            )}
-            {inCrm ? "No CRM" : "CRM"}
-          </Button>
-        </div>
-
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
+            className="h-10 gap-1.5 rounded-xl font-black shadow-lg shadow-primary/15 sm:col-span-3"
             disabled={!hasPhone}
             onClick={() => onOpenWhatsApp(lead)}
           >
             <Phone className="h-3.5 w-3.5" />
-            WhatsApp
+            Prospectar agora
           </Button>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
-            disabled={!hasWebsite}
-            onClick={() => onOpenWebsite(lead)}
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Site
+          <Button variant={approachGenerated ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onGenerateApproach(lead)}>
+            {approachGenerated ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <BrainCircuit className="h-3.5 w-3.5" />}
+            {approachGenerated ? "Copiada" : "Mensagem"}
           </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
-            onClick={() => onOpenMaps(lead)}
-          >
-            <ArrowUpRight className="h-3.5 w-3.5" />
-            Maps
+          <Button variant={saved ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onSave(lead)}>
+            {saved ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <BookmarkPlus className="h-3.5 w-3.5" />}
+            {saved ? "Salvo" : "Salvar"}
+          </Button>
+          <Button variant={inCrm ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onSendToCrm(lead)}>
+            {inCrm ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Send className="h-3.5 w-3.5" />}
+            {inCrm ? "No CRM" : "CRM"}
+          </Button>
+          <Button variant={hasFollowup ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onCreateFollowup(lead)}>
+            {hasFollowup ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Follow-up
+          </Button>
+          <Button variant={inCampaign ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onAddToCampaign(lead)}>
+            {inCampaign ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <MessageSquareText className="h-3.5 w-3.5" />}
+            Campanha
+          </Button>
+          <Button variant={contacted ? "secondary" : "outline"} size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => onMarkContacted(lead)}>
+            {contacted ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Phone className="h-3.5 w-3.5" />}
+            Contatado
           </Button>
         </div>
 
-        <div className="mt-3 flex items-center justify-between">
-          <div className="flex items-center gap-1 text-xs">
-            <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-            <span className="font-semibold">
-              {lead.google_rating ? lead.google_rating.toFixed(1) : "—"}
-            </span>
-            <span className="text-muted-foreground">
-              ({lead.google_reviews_count || 0})
-            </span>
-          </div>
-
-          <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
-            {lead.status || "novo"}
-          </span>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" disabled={!hasWebsite} onClick={() => onOpenWebsite(lead)}>
+            <ExternalLink className="h-3.5 w-3.5" /> Site
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => onOpenMaps(lead)}>
+            <ArrowUpRight className="h-3.5 w-3.5" /> Maps
+          </Button>
+          <Button variant={discarded ? "secondary" : "ghost"} size="sm" className="h-8 gap-1.5 text-xs" onClick={() => onDiscard(lead)}>
+            {discarded ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <X className="h-3.5 w-3.5" />}
+            {discarded ? "Descartado" : "Descartar"}
+          </Button>
         </div>
       </div>
     </motion.div>
   );
 }
-
 
 function InsightRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
